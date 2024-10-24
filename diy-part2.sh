@@ -10,8 +10,14 @@
 # See /LICENSE for more information.
 #
 
+# theme
+sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
+# banner
+cp -f diy/banner package/base-files/files/etc/banner
+sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by ${{AUTHORED_BY}}/g" package/base-files/files/etc/banner
+
 # Modify default IP
-sed -i 's/192.168.1.1/172.16.3.15/g' package/base-files/files/bin/config_generate
+sed -i 's/192.168.1.1/172.16.3.18/g' package/base-files/files/bin/config_generate
 
 # Modify default theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile

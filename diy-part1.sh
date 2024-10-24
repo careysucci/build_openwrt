@@ -10,6 +10,14 @@
 # See /LICENSE for more information.
 #
 
+
+# clean plugin
+rm -rf feeds/packages/lang/golang
+git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
+rm -rf feeds/packages/luci/{luci-app-homeproxy,luci-app-openclash,luci-app-passwall}
+
+
 # Clean a feed source
 sed -i "/helloworld/d" "feeds.conf.default"
 
