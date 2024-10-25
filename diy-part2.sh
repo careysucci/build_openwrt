@@ -12,9 +12,11 @@
 
 # theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
+
+cp -f diy/common/zzz-default-settings package/lean/default-settings/files/zzz-default-settings
 # banner
 cp -f diy/banner package/base-files/files/etc/banner
-sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by ${{AUTHORED_BY}}/g" package/base-files/files/etc/banner
+sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by ${AUTHORED_BY}/g" package/base-files/files/etc/banner
 
 # Modify default IP
 sed -i 's/192.168.1.1/172.16.3.18/g' package/base-files/files/bin/config_generate

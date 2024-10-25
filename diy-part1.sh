@@ -12,15 +12,34 @@
 
 
 # clean plugin
+rm -rf feeds/packages/utils/v2dat
+rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
+rm -rf feeds/packages/luci/{*passwall*,*bypass*,*homeproxy*,*mihomo*,*openclash*}
+# update golang
 rm -rf feeds/packages/lang/golang
 git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
-rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
-rm -rf feeds/packages/luci/{luci-app-homeproxy,luci-app-openclash,luci-app-passwall}
 
 
 # Clean a feed source
 sed -i "/helloworld/d" "feeds.conf.default"
 
 # Add a feed source
-echo "src-git helloworld https://github.com/fw876/helloworld.git" >> "feeds.conf.default"
-echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
+{
+  "src-git helloworld https://github.com/fw876/helloworld.git"
+  'src-git passwall https://github.com/xiaorouji/openwrt-passwall'
+  'src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2'
+  "src-git OpenClash https://github.com/vernesong/OpenClash.git;master"
+  "src-git netspeedtest https://github.com/sirpdboy/netspeedtest.git;master"
+  "src-git diskman https://github.com/careysucci/luci-app-diskman.git;master"
+  "src-git homeproxy https://github.com/immortalwrt/homeproxy.git;master"
+} >> "feeds.conf.default"
+#echo "src-git helloworld https://github.com/fw876/helloworld.git" >> "feeds.conf.default"
+#echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >> "feeds.conf.default"
+#echo 'src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2' >> "feeds.conf.default"
+#echo "src-git OpenClash https://github.com/vernesong/OpenClash.git;master" >> "feeds.conf.default"
+#echo "src-git netspeedtest https://github.com/sirpdboy/netspeedtest.git;master" >> "feeds.conf.default"
+#echo "src-git diskman https://github.com/careysucci/luci-app-diskman.git;master" >> "feeds.conf.default"
+#echo "src-git homeproxy https://github.com/immortalwrt/homeproxy.git;master" >> "feeds.conf.default"
+#sed -i '1i src-git kenzo https://github.com/kenzok8/openwrt-packages' "feeds.conf.default"
+#sed -i '2i src-git small https://github.com/kenzok8/small' "feeds.conf.default"
+

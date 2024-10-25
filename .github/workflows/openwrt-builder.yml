@@ -93,8 +93,10 @@ jobs:
         chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
-        ./scripts/feeds update -a && ./scripts/feeds install -a
-        cp -f feeds/.config .config && make defconfig
+        ./scripts/feeds update -a
+        sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
+        ./scripts/feeds install -a
+        cp -f diy/x86/.config .config && make defconfig
 
     - name: Download package
       id: package
