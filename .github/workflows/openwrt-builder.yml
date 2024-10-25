@@ -96,7 +96,7 @@ jobs:
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
           ./scripts/feeds install -a
-          cp -f diy/x86/.config .config
+          cp -f $GITHUB_WORKSPACE/diy/x86/.config .config
 
       - name: Download package
         id: package
