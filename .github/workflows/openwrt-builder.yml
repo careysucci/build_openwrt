@@ -95,11 +95,13 @@ jobs:
           [ -e files ] && mv files openwrt/files
           [ -e .config ] && mv .config openwrt/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
-          cd openwrt
+          pushd openwrt
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
           ./scripts/feeds install -a
-          cp -f ../diy/x86/.config .config
+          popd
+          echo pwd
+          cp -f diy/x86/.config .config
 
       - name: Download package
         id: package
