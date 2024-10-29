@@ -95,20 +95,18 @@ jobs:
           [ -e files ] && mv files openwrt/files
           [ -e .config ] && mv .config openwrt/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
-          pushd openwrt
+          cd openwrt
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
           ./scripts/feeds install -a
-          popd
-          echo pwd
-          cp -f diy/x86/.config .config
+          cp -f $GITHUB_WORKSPACE/diy/x86/.config .config
 
       - name: Download package
         id: package
         run: |
           cd openwrt
           make defconfig
-          cp -f .config diy/common/.config
+          cp -f .config $GITHUB_WORKSPACE/diy/common/.config
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
