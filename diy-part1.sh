@@ -24,7 +24,7 @@ git clone -b 18.06 https://github.com/jerrykuku/luci-theme-argon.git package/lea
 git clone -b 18.06 https://github.com/jerrykuku/luci-app-argon-config.git package/lean/luci-app-argon-config
 # update golang
 rm -rf feeds/packages/lang/golang
-svn co https://github.com/openwrt/packages/branches/openwrt-23.05/lang/golang feeds/packages/lang/golang
+git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
 
 
 # Clean a feed source
