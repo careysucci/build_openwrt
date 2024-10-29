@@ -10,7 +10,10 @@
 # See /LICENSE for more information.
 #
 
-# theme
+# enter openwrt folder
+pushd openwrt || exit
+
+# switch theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
 
 cp -f diy/common/zzz-default-settings package/lean/default-settings/files/zzz-default-settings
@@ -26,3 +29,6 @@ sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/M
 
 # Modify hostname
 sed -i 's/OpenWrt/Wy.House/g' package/base-files/files/bin/config_generate
+
+# back to root folder
+popd || exit

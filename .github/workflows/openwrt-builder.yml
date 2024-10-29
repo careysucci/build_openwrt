@@ -15,6 +15,11 @@ name: OpenWrt Builder
 on:
   repository_dispatch:
   workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'ssh'
+        required: false
+        default: 'false'
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
@@ -35,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@master
 
       - name: Initialization environment
         env:
@@ -77,9 +82,7 @@ jobs:
       - name: Load custom feeds
         run: |
           [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-          chmod +x $DIY_P1_SH
-          cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P1_SH
+          chmod +x ./$DIY_P1_SH && ./$DIY_P1_SH
 
       - name: Update feeds
         run: |
@@ -90,20 +93,19 @@ jobs:
         run: |
           [ -e files ] && mv files openwrt/files
           [ -e .config ] && mv .config openwrt/.config
-          chmod +x $DIY_P2_SH
+          chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P2_SH
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
           ./scripts/feeds install -a
-          cp -f $GITHUB_WORKSPACE/diy/x86/.config .config
+          cp -f diy/x86/.config .config
 
       - name: Download package
         id: package
         run: |
           cd openwrt
-          make defconfig
-          make download -j8
+          make defconfig && cp -f .config diy/common/.config
+          make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
 
