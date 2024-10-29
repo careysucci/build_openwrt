@@ -32,6 +32,7 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   AUTHORED_BY: Wy.House
+  SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
   TZ: Asia/Shanghai
 
 jobs:
@@ -98,13 +99,14 @@ jobs:
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
           ./scripts/feeds install -a
-          cp -f diy/x86/.config .config
+          cp -f ../diy/x86/.config .config
 
       - name: Download package
         id: package
         run: |
           cd openwrt
-          make defconfig && cp -f .config diy/common/.config
+          make defconfig
+          cp -f .config diy/common/.config
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
