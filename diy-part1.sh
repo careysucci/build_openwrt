@@ -26,6 +26,13 @@ rm -rf package/lean/luci-app-argon-config
 rm -rf feeds/packages/lang/golang
 git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
 
+# pull package source code
+# homeproxy
+ if [[ ! -d "feeds/luci/applications/luci-app-homeproxy" ]]; then
+     mkdir -p "feeds/luci/applications/luci-app-homeproxy"
+ fi
+ git clone -b master https://github.com/immortalwrt/homeproxy.git feeds/luci/applications/luci-app-homeproxy
+
 
 # Clean a feed source
 sed -i "/helloworld/d" "feeds.conf.default"
@@ -38,10 +45,9 @@ sed -i "/helloworld/d" "feeds.conf.default"
   echo "src-git OpenClash https://github.com/vernesong/OpenClash.git;master"
   echo "src-git netspeedtest https://github.com/sirpdboy/netspeedtest.git;master"
   echo "src-git diskman https://github.com/careysucci/luci-app-diskman.git;master"
-  echo "src-git homeproxy https://github.com/immortalwrt/homeproxy.git;master"
   echo "src-git mihomo https://github.com/morytyann/OpenWrt-mihomo.git;main"
   echo "src-git kenzo https://github.com/kenzok8/openwrt-packages"
-  echo "src-git small https://github.com/kenzok8/small' feeds.conf.default"
+  echo "src-git small https://github.com/kenzok8/small feeds.conf.default"
 } >> "feeds.conf.default"
 
 # back to root folder
