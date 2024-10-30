@@ -10,6 +10,14 @@
 # See /LICENSE for more information.
 #
 
+# clear small duplicate packages
+ls -l feeds/packages/small/
+ls -l feeds/packages/small.index/
+rm -rf feeds/packages/small/luci-app-passwall
+rm -rf feeds/packages/small/luci-app-passwall2
+rm -rf feeds/packages/small/luci-app-openclash
+rm -rf feeds/packages/small/luci-app-homeproxy
+rm -rf feeds/packages/small/mihomo
 
 # switch theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' openwrt/feeds/luci/collections/luci/Makefile
@@ -17,7 +25,7 @@ sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' openwrt/feeds/luci/collection
 cp -f diy/common/zzz-default-settings openwrt/package/lean/default-settings/files/zzz-default-settings
 # banner
 cp -f diy/banner openwrt/package/base-files/files/etc/banner
-sed -i "s/%D %V, %C/openwrt $(date +'%m.%d') by ${AUTHORED_BY}/g" openwrt/package/base-files/files/etc/banner
+sed -i "s/%D %V, %C/OpenWrt by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" openwrt/package/base-files/files/etc/banner
 
 # Modify default IP
 sed -i 's/192.168.1.1/172.16.3.18/g' openwrt/package/base-files/files/bin/config_generate

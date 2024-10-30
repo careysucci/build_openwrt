@@ -96,8 +96,7 @@ jobs:
           [ -e .config ] && mv .config openwrt/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd openwrt
-          ./scripts/feeds update -a
-          sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile 
+          sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
           ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/diy/x86/.config .config
 
@@ -162,7 +161,7 @@ jobs:
         uses: softprops/action-gh-release@master
         if: steps.tag.outputs.status == 'success' && !cancelled()
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt
@@ -181,4 +180,4 @@ jobs:
           keep_latest: 3
           delete_tags: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
