@@ -11,8 +11,6 @@
 #
 
 # clear small duplicate packages
-ls -l openwrt/feeds/small/
-ls -l openwrt/feeds/small.index/
 rm -rf openwrt/feeds/small/luci-app-passwall
 rm -rf openwrt/feeds/small/luci-app-passwall2
 rm -rf openwrt/feeds/small/luci-app-openclash
