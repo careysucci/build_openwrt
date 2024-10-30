@@ -47,7 +47,7 @@ sed -i "/helloworld/d" "feeds.conf.default"
   echo "src-git diskman https://github.com/careysucci/luci-app-diskman.git;master"
   echo "src-git mihomo https://github.com/morytyann/OpenWrt-mihomo.git;main"
   echo "src-git kenzo https://github.com/kenzok8/openwrt-packages"
-  echo "src-git small https://github.com/kenzok8/small feeds.conf.default"
+  echo "src-git small https://github.com/kenzok8/small"
 } >> "feeds.conf.default"
 
 # back to root folder
