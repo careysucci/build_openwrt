@@ -11,13 +11,13 @@
 #
 
 # clear small duplicate packages
-ls -l feeds/small/
-ls -l feeds/small.index/
-rm -rf feeds/small/luci-app-passwall
-rm -rf feeds/small/luci-app-passwall2
-rm -rf feeds/small/luci-app-openclash
-rm -rf feeds/small/luci-app-homeproxy
-rm -rf feeds/small/mihomo
+ls -l openwrt/feeds/small/
+ls -l openwrt/feeds/small.index/
+rm -rf openwrt/feeds/small/luci-app-passwall
+rm -rf openwrt/feeds/small/luci-app-passwall2
+rm -rf openwrt/feeds/small/luci-app-openclash
+rm -rf openwrt/feeds/small/luci-app-homeproxy
+rm -rf openwrt/feeds/small/mihomo
 
 # switch theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' openwrt/feeds/luci/collections/luci/Makefile
