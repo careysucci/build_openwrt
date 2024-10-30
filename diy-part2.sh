@@ -34,4 +34,4 @@ sed -i 's/192.168.1.1/172.16.3.18/g' openwrt/package/base-files/files/bin/config
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' openwrt/feeds/luci/collections/luci/Makefile
 
 # Modify hostname
-sed -i 's/OpenWrt/Wy.House/g' openwrt/package/base-files/files/bin/config_generate
+sed -i "s/OpenWrt/${AUTHORED_BY}/g" openwrt/package/base-files/files/bin/config_generate

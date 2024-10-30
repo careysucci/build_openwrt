@@ -8,7 +8,7 @@ uci set luci.main.lang=zh_cn
 uci commit luci
 
 uci set system.@system[0].timezone=CST-8
-uci set system.@system[0].zonename=Asia/Shanghai
+uci set system.@system[0].zonename=Asia/Hong_Kong
 uci commit system
 
 uci set fstab.@global[0].anon_mount=1
@@ -53,12 +53,9 @@ echo "DISTRIB_RELEASE='v$(date +'%Y.%m.%d')'" >> /etc/openwrt_release
 sed -i '/DISTRIB_DESCRIPTION/d' /etc/openwrt_release
 echo "DISTRIB_DESCRIPTION='Openwrt '" >> /etc/openwrt_release
 
-sed -i 's/LuCI Master/kenzo/g' /usr/lib/lua/luci/version.lua
-sed -i 's/LuCI openwrt-21.02 branch/kenzo/g' /usr/lib/lua/luci/version.lua
-sed -i 's/LuCI openwrt-18.06 branch/kenzo/g' /usr/lib/lua/luci/version.lua
-sed -i 's/LuCI openwrt-18.06-k5.4 branch/kenzo/g' /usr/lib/lua/luci/version.lua
-sed -i 's/LuCI 17.01 Lienol/kenzo/g' /usr/lib/lua/luci/version.lua
-sed -i 's/LuCI OpenWrt 23.05-SNAPSHOT/kenzo/g' /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI Master/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI openwrt-23.05/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI OpenWrt 23.05-SNAPSHOT/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
 sed -i '/luciversion/d' /usr/lib/lua/luci/version.lua
 echo "luciversion ='$(date +'%m.%d')'" >> /usr/lib/lua/luci/version.lua
 
