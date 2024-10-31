@@ -93,7 +93,7 @@ jobs:
       - name: Load custom configuration
         run: |
           [ -e files ] && mv files openwrt/files
-          [ -e .config ] && mv .config openwrt/.config
+          [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/.config openwrt/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd openwrt
           ./scripts/feeds update -a
