@@ -55,7 +55,7 @@ echo "DISTRIB_DESCRIPTION='Openwrt '" >> /etc/openwrt_release
 
 sed -i "s/LuCI Master/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
 sed -i "s/LuCI openwrt-23.05/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
-sed -i "s/LuCI OpenWrt 23.05-SNAPSHOT/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI openwrt 23.05-SNAPSHOT/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
 sed -i '/luciversion/d' /usr/lib/lua/luci/version.lua
 echo "luciversion ='$(date +'%m.%d')'" >> /usr/lib/lua/luci/version.lua
 

@@ -20,7 +20,7 @@ rm -rf openwrt/feeds/small/mihomo
 # switch theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' openwrt/feeds/luci/collections/luci/Makefile
 
-cp -f diy/common/default-settings openwrt/package/lean/default-settings/files/zzz-default-settings
+cp -f diy/common/zzz-default-settings openwrt/package/lean/default-settings/files/zzz-default-settings
 # banner
 cp -f diy/banner openwrt/package/base-files/files/etc/banner
 sed -i "s/%D %V, %C/OpenWrt by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" openwrt/package/base-files/files/etc/banner
