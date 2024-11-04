@@ -104,7 +104,7 @@ jobs:
 
       - name: SSH Debug
         uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 40
+        timeout-minutes: 60
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
 
       - name: Download package
