@@ -111,6 +111,9 @@ jobs:
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
 
+      - name: SSH远程连接（make menuconfig）
+        uses: danshui-git/debugger-action@main
+
       - name: Compile the firmware
         id: compile
         run: |
