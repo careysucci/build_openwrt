@@ -97,10 +97,11 @@ jobs:
           [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/.config openwrt/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd openwrt
+          make defconfig
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
           ./scripts/feeds install -a
-          cp -f $GITHUB_WORKSPACE/diy/x86/.config .config
+          cp -f $GITHUB_WORKSPACE/diy/x86/.config .config && make defconfig
 
       - name: SSH Enabled Debug
         timeout-minutes: 30
@@ -111,7 +112,6 @@ jobs:
         id: package
         run: |
           cd openwrt
-          make defconfig
           cp -f .config $GITHUB_WORKSPACE/diy/common/.config
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
