@@ -18,7 +18,7 @@ rm -rf openwrt/feeds/small/luci-app-homeproxy
 rm -rf openwrt/feeds/small/mihomo
 rm -rf openwrt/feeds/small/luci-app-mihomo
 
-# switch theme
+# Modify default theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' openwrt/feeds/luci/collections/luci/Makefile
 
 cp -f diy/common/zzz-default-settings openwrt/package/lean/default-settings/files/zzz-default-settings
@@ -28,9 +28,6 @@ sed -i "s/%D %V, %C/OpenWrt by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" openwrt/pac
 
 # Modify default IP
 sed -i 's/192.168.1.1/172.16.3.18/g' openwrt/package/base-files/files/bin/config_generate
-
-# Modify default theme
-sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' openwrt/feeds/luci/collections/luci/Makefile
 
 # Modify hostname
 sed -i "s/OpenWrt/${AUTHORED_BY}/g" openwrt/package/base-files/files/bin/config_generate
