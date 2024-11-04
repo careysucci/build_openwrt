@@ -102,11 +102,6 @@ jobs:
           ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/diy/x86/.config .config
 
-      - name: SSH Debug
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
-
       - name: Download package
         id: package
         run: |
@@ -116,6 +111,11 @@ jobs:
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
+
+      - name: SSH Debug
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
 
       - name: Compile the firmware
         id: compile
