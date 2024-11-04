@@ -16,10 +16,11 @@ on:
   repository_dispatch:
   workflow_dispatch:
     inputs:
-      ssh:
+      ssh_enabled:
         description: 'ssh'
+        type: boolean
         required: false
-        default: 'false'
+        default: false
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
@@ -41,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Initialization environment
         env:
@@ -101,6 +102,11 @@ jobs:
           ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/diy/x86/.config .config
 
+      - name: SSH Debug
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 40
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
+
       - name: Download package
         id: package
         run: |
@@ -110,9 +116,6 @@ jobs:
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
-
-      - name: SSH远程连接（make menuconfig）
-        uses: danshui-git/debugger-action@main
 
       - name: Compile the firmware
         id: compile
