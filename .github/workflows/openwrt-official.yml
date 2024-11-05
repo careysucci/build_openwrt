@@ -72,33 +72,34 @@ jobs:
         working-directory: /workdir
         run: |
           df -hT $PWD
-          git clone $REPO_URL -b $REPO_BRANCH ${{ env.TARGET_MATRIX }}
-          ln -sf /workdir/${{ env.TARGET_MATRIX }} $GITHUB_WORKSPACE/${{ env.TARGET_MATRIX }}
+          git clone $REPO_URL -b $REPO_BRANCH official
+          ln -sf /workdir/official $GITHUB_WORKSPACE/official
 
       - name: Free up disk space
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo mkdir -p -m 777 /mnt/${{ env.TARGET_MATRIX }}/dl /mnt/${{ env.TARGET_MATRIX }}/bin /mnt/${{ env.TARGET_MATRIX }}/staging_dir
-          ln -sf /mnt/${{ env.TARGET_MATRIX }}/dl ${{ env.TARGET_MATRIX }}/dl
-          ln -sf /mnt/${{ env.TARGET_MATRIX }}/bin ${{ env.TARGET_MATRIX }}/bin
-          ln -sf /mnt/${{ env.TARGET_MATRIX }}/staging_dir ${{ env.TARGET_MATRIX }}/staging_dir
+          sudo mkdir -p -m 777 /mnt/official/dl /mnt/official/bin /mnt/official/staging_dir
+          ln -sf /mnt/official/dl official/dl
+          ln -sf /mnt/official/bin official/bin
+          ln -sf /mnt/official/staging_dir official/staging_dir
 
       - name: Load custom feeds
         run: |
+          echo "TARGET_MATRIX=official" >> $GITHUB_ENV
           chmod +x ./$DIY_P1_SH && ./$DIY_P1_SH
 
       - name: Update feeds
         run: |
-          cd ${{ env.TARGET_MATRIX }}
+          cd official
           ./scripts/feeds update -a
 
       - name: Load custom configuration
         run: |
-          [ -e files ] && mv files ${{ env.TARGET_MATRIX }}/files
-          [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/official.config ${{ env.TARGET_MATRIX }}/.config
+          [ -e files ] && mv files official/files
+          [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/official.config official/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
-          cd ${{ env.TARGET_MATRIX }}
+          cd official
           ./scripts/feeds update -a && ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/diy/x86/official.config .config && make defconfig
 
@@ -110,7 +111,7 @@ jobs:
       - name: Download package
         id: package
         run: |
-          cd ${{ env.TARGET_MATRIX }}
+          cd official
           cp -f .config $GITHUB_WORKSPACE/diy/common/.config
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
@@ -119,7 +120,7 @@ jobs:
       - name: Compile the firmware
         id: compile
         run: |
-          cd ${{ env.TARGET_MATRIX }}
+          cd official
           echo -e "$(nproc) thread compile"
           make -j$(nproc) || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
@@ -141,13 +142,13 @@ jobs:
         if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
         with:
           name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-          path: ${{ env.TARGET_MATRIX }}/bin
+          path: official/bin
 
       - name: Organize files
         id: organize
         if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
         run: |
-          cd ${{ env.TARGET_MATRIX }}/bin/targets/*/*
+          cd official/bin/targets/*/*
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
