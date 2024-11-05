@@ -11,7 +11,7 @@
 #
 
 # enter openwrt folder
-pushd openwrt || exit
+pushd "${TARGET_MATRIX}" || exit
 
 # clean plugin
 rm -rf feeds/packages/utils/v2dat
