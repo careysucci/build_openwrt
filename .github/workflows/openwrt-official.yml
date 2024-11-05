@@ -21,10 +21,17 @@ on:
         type: boolean
         required: false
         default: false
+      branch:
+        description: 'repo branch'
+        type: choice
+        required: true
+        options:
+        - openwrt-23.05
+        - openwrt-24.10
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
-  REPO_BRANCH: openwrt-24.10
+  REPO_BRANCH: ${{ inputs.branch }}
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: diy/x86/official.config
   DIY_P1_SH: diy-part1.sh
