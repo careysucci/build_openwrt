@@ -97,9 +97,7 @@ jobs:
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd openwrt
           make defconfig
-          ./scripts/feeds update -a
-          sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
-          ./scripts/feeds install -a
+          ./scripts/feeds update -a && ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/diy/x86/.config .config && make defconfig
 
       - name: SSH Enabled Debug
