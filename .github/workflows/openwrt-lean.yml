@@ -97,7 +97,6 @@ jobs:
           [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/lean.config openwrt/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd openwrt
-          make defconfig
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
           ./scripts/feeds install -a

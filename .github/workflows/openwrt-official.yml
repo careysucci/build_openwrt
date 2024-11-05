@@ -96,7 +96,6 @@ jobs:
           [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/official.config openwrt/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd openwrt
-          make defconfig
           ./scripts/feeds update -a && ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/diy/x86/official.config .config && make defconfig
 
