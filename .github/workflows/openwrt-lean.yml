@@ -34,6 +34,7 @@ env:
   UPLOAD_RELEASE: true
   AUTHORED_BY: Wy.House
   IMG_PREFIX: WyHouse
+  TARGET_MATRIX: lede
   SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
   TZ: Asia/Shanghai
 
@@ -86,7 +87,6 @@ jobs:
       - name: Load custom feeds
         run: |
           [ -e $FEEDS_CONF ] && mv $FEEDS_CONF lede/feeds.conf.default
-          echo "TARGET_MATRIX=lede" >> $GITHUB_ENV
           chmod +x ./$DIY_P1_SH && ./$DIY_P1_SH
 
       - name: Update feeds
