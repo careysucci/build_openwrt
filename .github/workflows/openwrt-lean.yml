@@ -33,6 +33,7 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   AUTHORED_BY: Wy.House
+  IMG_PREFIX: WyHouse
   SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
   TZ: Asia/Shanghai
 
@@ -69,34 +70,34 @@ jobs:
         working-directory: /workdir
         run: |
           df -hT $PWD
-          git clone $REPO_URL -b $REPO_BRANCH openwrt
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+          git clone $REPO_URL -b $REPO_BRANCH lede
+          ln -sf /workdir/lede $GITHUB_WORKSPACE/lede
 
       - name: Free up disk space
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo mkdir -p -m 777 /mnt/openwrt/dl /mnt/openwrt/bin /mnt/openwrt/staging_dir
-          ln -sf /mnt/openwrt/dl openwrt/dl
-          ln -sf /mnt/openwrt/bin openwrt/bin
-          ln -sf /mnt/openwrt/staging_dir openwrt/staging_dir
+          sudo mkdir -p -m 777 /mnt/lede/dl /mnt/lede/bin /mnt/lede/staging_dir
+          ln -sf /mnt/lede/dl lede/dl
+          ln -sf /mnt/lede/bin lede/bin
+          ln -sf /mnt/lede/staging_dir lede/staging_dir
 
       - name: Load custom feeds
         run: |
-          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF lede/feeds.conf.default
           chmod +x ./$DIY_P1_SH && ./$DIY_P1_SH
 
       - name: Update feeds
         run: |
-          cd openwrt
+          cd lede
           ./scripts/feeds update -a
 
       - name: Load custom configuration
         run: |
-          [ -e files ] && mv files openwrt/files
-          [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/lean.config openwrt/.config
+          [ -e files ] && mv files lede/files
+          [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/lean.config lede/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
-          cd openwrt
+          cd lede
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
           ./scripts/feeds install -a
@@ -110,7 +111,7 @@ jobs:
       - name: Download package
         id: package
         run: |
-          cd openwrt
+          cd lede
           cp -f .config $GITHUB_WORKSPACE/diy/common/.config
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
@@ -119,7 +120,7 @@ jobs:
       - name: Compile the firmware
         id: compile
         run: |
-          cd openwrt
+          cd lede
           echo -e "$(nproc) thread compile"
           make -j$(nproc) || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
@@ -141,13 +142,13 @@ jobs:
         if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
         with:
           name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-          path: openwrt/bin
+          path: lede/bin
 
       - name: Organize files
         id: organize
         if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
         run: |
-          cd openwrt/bin/targets/*/*
+          cd lede/bin/targets/*/*
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
@@ -156,7 +157,7 @@ jobs:
         uses: actions/upload-artifact@main
         if: steps.organize.outputs.status == 'success' && !cancelled()
         with:
-          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          name: ${{ env.IMG_PREFIX }}_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
       - name: Generate release tag
