@@ -34,7 +34,6 @@ env:
   UPLOAD_RELEASE: true
   AUTHORED_BY: Wy.House
   IMG_PREFIX: WyHouse
-  TARGET_MATRIX: ${{matrix.target}}
   SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
   TZ: Asia/Shanghai
 
