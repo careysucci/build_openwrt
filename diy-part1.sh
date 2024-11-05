@@ -30,6 +30,7 @@ git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
 # homeproxy
  if [[ ! -d "feeds/luci/applications/luci-app-homeproxy" ]]; then
      mkdir -p "feeds/luci/applications/luci-app-homeproxy"
+     echo "create folder feeds/luci/applications/luci-app-homeproxy"
  fi
  git clone -b master https://github.com/immortalwrt/homeproxy.git feeds/luci/applications/luci-app-homeproxy
 

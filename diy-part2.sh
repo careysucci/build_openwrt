@@ -14,7 +14,7 @@
 rm -rf openwrt/feeds/small/luci-app-passwall
 rm -rf openwrt/feeds/small/luci-app-passwall2
 rm -rf openwrt/feeds/small/luci-app-openclash
-rm -rf openwrt/feeds/small/luci-app-homeproxy
+#rm -rf openwrt/feeds/small/luci-app-homeproxy
 rm -rf openwrt/feeds/small/mihomo
 rm -rf openwrt/feeds/small/luci-app-mihomo
 
