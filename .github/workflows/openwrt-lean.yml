@@ -106,9 +106,12 @@ jobs:
           cp -f $GITHUB_WORKSPACE/diy/x86/lean.config .config && make defconfig
 
       - name: SSH Enabled Debug
-        timeout-minutes: 30
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
-        uses: mxschmitt/action-tmate@v3.19
+        uses: lhotari/action-upterm@v1
+        with:
+          wait-timeout-minutes: 20
+          limit-access-to-actor: true
+          limit-access-to-users: careysucci
 
       - name: Download package
         id: package
@@ -131,9 +134,12 @@ jobs:
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
       - name: SSH Failed Debug
-        timeout-minutes: 40
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3.19
+        uses: lhotari/action-upterm@v1
+        with:
+          wait-timeout-minutes: 40
+          limit-access-to-actor: true
+          limit-access-to-users: careysucci
 
       - name: Check space usage
         if: (!cancelled())
