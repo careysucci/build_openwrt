@@ -98,7 +98,7 @@ jobs:
       - name: Update feeds
         run: |
           cd ${{ env.TARGET_MATRIX }}
-          ./scripts/feeds update -a
+          ./scripts/feeds update -a && ./scripts/feeds install -a
 
       - name: Load custom configuration
         run: |
@@ -106,6 +106,7 @@ jobs:
           [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/official.config ${{ env.TARGET_MATRIX }}/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
+          make defconfig
           ./scripts/feeds update -a && ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/diy/x86/official.config .config && make defconfig
 
