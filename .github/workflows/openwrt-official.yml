@@ -21,6 +21,11 @@ on:
         type: boolean
         required: false
         default: false
+      clear_actions_cache:
+        description: 'clear actions cache'
+        type: boolean
+        required: false
+        default: false
       branch:
         description: 'repo branch'
         type: choice
