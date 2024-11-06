@@ -21,6 +21,11 @@ on:
         type: boolean
         required: false
         default: false
+      clear_actions_cache:
+        description: 'clear actions cache'
+        type: boolean
+        required: false
+        default: false
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
@@ -43,9 +48,12 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: AutoModality/action-clean@v1.1.0
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: clear actions cache
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.clear_actions_cache }}
+        uses: AutoModality/action-clean@v1.1.0
 
       - name: Initialization environment
         env:
