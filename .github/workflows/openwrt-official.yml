@@ -21,6 +21,11 @@ on:
         type: boolean
         required: false
         default: false
+      clear_actions_cache:
+        description: 'clear actions cache'
+        type: boolean
+        required: false
+        default: false
       branch:
         description: 'repo branch'
         type: choice
@@ -42,7 +47,6 @@ env:
   AUTHORED_BY: Wy.House
   IMG_PREFIX: WyHouse
   TARGET_MATRIX: official
-  SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
   TZ: Asia/Shanghai
 
 jobs:
@@ -50,9 +54,12 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: AutoModality/action-clean@v1.1.0
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: clear actions cache
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.clear_actions_cache }}
+        uses: AutoModality/action-clean@v1.1.0
 
       - name: Initialization environment
         env:
@@ -111,9 +118,11 @@ jobs:
           cp -f $GITHUB_WORKSPACE/diy/x86/official.config .config && make defconfig
 
       - name: SSH Enabled Debug
-        timeout-minutes: 30
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
-        uses: mxschmitt/action-tmate@v3.19
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
+        with:
+          limit-access-to-actor: true
 
       - name: Download package
         id: package
@@ -136,9 +145,11 @@ jobs:
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
       - name: SSH Failed Debug
-        timeout-minutes: 40
         if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3.19
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
+        with:
+          limit-access-to-actor: true
 
       - name: Check space usage
         if: (!cancelled())
