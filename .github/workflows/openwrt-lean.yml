@@ -103,13 +103,13 @@ jobs:
       - name: Load custom configuration
         run: |
           [ -e files ] && mv files ${{ env.TARGET_MATRIX }}/files
-          [ -e .config ] && mv $GITHUB_WORKSPACE/diy/x86/lean.config ${{ env.TARGET_MATRIX }}/.config
+          [ -e .config ] && mv $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
           ./scripts/feeds install -a
-          cp -f $GITHUB_WORKSPACE/diy/x86/lean.config .config && make defconfig
+          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config && make defconfig
 
       - name: SSH Enabled Debug
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
