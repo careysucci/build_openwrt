@@ -31,8 +31,8 @@ pushd "${TARGET_MATRIX}" || exit
 short_commit_id=$(git rev-parse --short HEAD)
 popd || exit
 sed -i "s/%D/WyWrt/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
-sed -i "s/%V/${DATE1}/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
-sed -i "s/%C/git ${short_commit_id}/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
+sed -i "s/%V/${DATE4}/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
+sed -i "s/%C/git-${short_commit_id}/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
 sed -i "s/Openwrt/Wywrt/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
 
 # Modify default IP
