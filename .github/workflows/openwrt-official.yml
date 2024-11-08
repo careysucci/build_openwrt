@@ -47,6 +47,7 @@ env:
   AUTHORED_BY: Wy.House
   IMG_PREFIX: WyHouse
   TARGET_MATRIX: official
+  RELEASE_NAME: WyWrt
   TZ: Asia/Shanghai
 
 jobs:
