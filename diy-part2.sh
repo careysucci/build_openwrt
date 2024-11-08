@@ -27,7 +27,7 @@ cp -f diy/common/zzz-default-settings "${TARGET_MATRIX}"/package/lean/default-se
 cp -f diy/banner "${TARGET_MATRIX}"/package/base-files/files/etc/banner
 sed -i "s/%D %V, %C/OpenWrt by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" "${TARGET_MATRIX}"/package/base-files/files/etc/banner
 # openwrt-release
-sed -i "s/OpenWrt/WyWrt/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
+sed -i "s/%D/WyWrt/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
 sed -i "s/Openwrt/Wywrt/g" "${TARGET_MATRIX}"/package/base-files/files/etc/openwrt_release
 
 # Modify default IP
