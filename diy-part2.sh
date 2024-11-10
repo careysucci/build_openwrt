@@ -39,11 +39,11 @@ sed -i "s/%D/${RELEASE_NAME}/g" "${TARGET_MATRIX}"/package/base-files/files/usr/
 sed -i "s/%V/${DATE4}/g" "${TARGET_MATRIX}"/package/base-files/files/usr/lib/os-release
 sed -i "s/%C/git-${short_commit_id}/g" "${TARGET_MATRIX}"/package/base-files/files/usr/lib/os-release
 # mkversion
-case ${TARGET_MATRIX} in
-  'lede')
+case "${TARGET_MATRIX}" in
+  "lede")
     sed -i "s/\${2:-Git}/${short_commit_id}/g" "${TARGET_MATRIX}"/package/feeds/luci/luci-lua-runtime/src/mkversion.sh
     ;;
-  'official')
+  "official")
   # luci name
 #    sed -i "s/\$\{3:-LuCI\}//g" "${TARGET_MATRIX}"/feeds/base/feeds/luci/luci-lua-runtime/src/mkversion.sh
     # luci version
