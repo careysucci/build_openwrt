@@ -7,7 +7,7 @@ uci set luci.main.lang=zh_cn
 #uci set luci.main.mediaurlbase=/luci-static/bootstrap_mod
 uci commit luci
 
-uci set system.@system[0].timezone=CST-8
+uci set system.@system[0].timezone=UTC+08
 uci set system.@system[0].zonename=Asia/Hong_Kong
 uci commit system
 
@@ -33,8 +33,8 @@ uci set dhcp.lan.ra_default='1'
 #uci set dhcp.@dnsmasq[0].nonwildcard=0
 uci commit dhcp
 
-#uci set network.lan.ipaddr='192.168.119.254'
-#uci set network.lan.netmask='255.255.255.0'
+uci set network.lan.ipaddr='172.16.3.18'
+uci set network.lan.netmask='255.255.255.0'
 uci set network.lan.ip6assign='64'
 uci commit network
 
@@ -53,9 +53,9 @@ echo "DISTRIB_RELEASE='v$(date +'%Y.%m.%d')'" >> /etc/openwrt_release
 sed -i '/DISTRIB_DESCRIPTION/d' /etc/openwrt_release
 echo "DISTRIB_DESCRIPTION='Openwrt '" >> /etc/openwrt_release
 
-sed -i "s/LuCI Master/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
-sed -i "s/LuCI openwrt-23.05/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
-sed -i "s/LuCI openwrt 23.05-SNAPSHOT/${AUTHORED_BY}/g" /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI Master/Wy.House/g" /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI openwrt-23.05/Wy.House/g" /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI openwrt 23.05-SNAPSHOT/Wy.House/g" /usr/lib/lua/luci/version.lua
 sed -i '/luciversion/d' /usr/lib/lua/luci/version.lua
 echo "luciversion ='$(date +'%m.%d')'" >> /usr/lib/lua/luci/version.lua
 
