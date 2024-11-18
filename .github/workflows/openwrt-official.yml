@@ -116,7 +116,8 @@ jobs:
           cd ${{ env.TARGET_MATRIX }}
           make defconfig
           ./scripts/feeds update -a && ./scripts/feeds install -a
-          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config && make defconfig
+          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
+          make defconfig
 
       - name: SSH Enabled Debug
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}

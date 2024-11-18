@@ -111,7 +111,8 @@ jobs:
           ./scripts/feeds update -a
           sed -i 's#GO_PKG_TARGET_VARS.*# #g' feeds/packages/utils/v2dat/Makefile
           ./scripts/feeds install -a
-          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config && make defconfig
+          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
+          make defconfig
 
       - name: SSH Enabled Debug
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
