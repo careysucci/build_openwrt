@@ -12,6 +12,7 @@
 
 # enter openwrt folder
 pushd "${TARGET_MATRIX}" || exit
+echo "Entering OpenWrt folder: ${TARGET_MATRIX}"
 
 # clean plugin
 rm -rf feeds/packages/utils/v2dat
@@ -24,7 +25,8 @@ rm -rf package/lean/luci-app-argon-config
 #git clone -b 18.06 https://github.com/jerrykuku/luci-app-argon-config.git package/lean/luci-app-argon-config
 # update golang
 rm -rf feeds/packages/lang/golang
-git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+#git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 23.x feeds/packages/lang/golang
 
 # pull package source code
 # homeproxy
