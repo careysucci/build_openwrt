@@ -53,7 +53,7 @@ jobs:
     steps:
       - name: clear actions cache
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.clear_actions_cache }}
-        uses: AutoModality/action-clean@v1.1.1
+        uses: AutoModality/action-clean@v1.1.0
 
       - name: Checkout
         uses: actions/checkout@v4.2.2
