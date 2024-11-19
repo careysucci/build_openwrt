@@ -15,18 +15,12 @@ pushd "${TARGET_MATRIX}" || exit
 echo "Entering OpenWrt folder: ${TARGET_MATRIX}"
 
 # clean plugin
-rm -rf feeds/packages/utils/v2dat
-rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
 rm -rf feeds/packages/luci/{*passwall*,*bypass*,*homeproxy*,*mihomo*,*openclash*}
 # theme
 rm -rf package/lean/luci-theme-argon
 rm -rf package/lean/luci-app-argon-config
 #git clone -b 18.06 https://github.com/jerrykuku/luci-theme-argon.git package/lean/luci-theme-argon
 #git clone -b 18.06 https://github.com/jerrykuku/luci-app-argon-config.git package/lean/luci-app-argon-config
-# update golang
-rm -rf feeds/packages/lang/golang
-#git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 23.x feeds/packages/lang/golang
 
 # pull package source code
 # homeproxy
