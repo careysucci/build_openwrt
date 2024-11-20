@@ -14,10 +14,10 @@
 # clear small duplicate packages
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-passwall
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-passwall2
-rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-openclash
+#rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-openclash
 #rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-homeproxy
-rm -rf "${TARGET_MATRIX}"/feeds/small/mihomo
-rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-mihomo
+#rm -rf "${TARGET_MATRIX}"/feeds/small/mihomo
+#rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-mihomo
 
 # Modify default theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' "${TARGET_MATRIX}"/feeds/luci/collections/luci/Makefile
