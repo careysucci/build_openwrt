@@ -44,7 +44,7 @@ sed -i "/helloworld/d" "feeds.conf.default"
   echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall'
   echo 'src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2'
 #  echo "src-git OpenClash https://github.com/vernesong/OpenClash.git;master"
-#  echo "src-git mihomo https://github.com/morytyann/OpenWrt-mihomo.git;main"
+  echo "src-git mihomo https://github.com/morytyann/OpenWrt-mihomo.git;main"
 } >> "feeds.conf.default"
 
 # back to root folder

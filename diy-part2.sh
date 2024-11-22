@@ -16,13 +16,13 @@ rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-passwall
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-passwall2
 #rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-openclash
 #rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-homeproxy
-#rm -rf "${TARGET_MATRIX}"/feeds/small/mihomo
-#rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-mihomo
+rm -rf "${TARGET_MATRIX}"/feeds/small/mihomo
+rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-mihomo
 
 # Modify default theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' "${TARGET_MATRIX}"/feeds/luci/collections/luci/Makefile
 
-cp -f diy/common/zzz-default-settings "${TARGET_MATRIX}"/package/lean/default-settings/files/zzz-default-settings
+#cp -f diy/common/zzz-default-settings "${TARGET_MATRIX}"/package/lean/default-settings/files/zzz-default-settings
 # banner
 cp -f diy/banner "${TARGET_MATRIX}"/package/base-files/files/etc/banner
 sed -i "s/%D %V, %C/OpenWrt by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" "${TARGET_MATRIX}"/package/base-files/files/etc/banner
@@ -53,6 +53,7 @@ esac
 
 # Modify default IP
 sed -i 's/192.168.1.1/172.16.3.18/g' "${TARGET_MATRIX}"/package/base-files/files/bin/config_generate
+sed -i 's/255.255.255.0/255.255.248.0/g' "${TARGET_MATRIX}"/package/base-files/files/bin/config_generate
 
 # Modify hostname
 sed -i "s/OpenWrt/${AUTHORED_BY}/g" "${TARGET_MATRIX}"/package/base-files/files/bin/config_generate

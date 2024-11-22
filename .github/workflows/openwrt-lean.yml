@@ -98,7 +98,6 @@ jobs:
 
       - name: Load custom feeds
         run: |
-          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF ${{ env.TARGET_MATRIX }}/feeds.conf.default
           chmod +x ./$DIY_P1_SH && ./$DIY_P1_SH
 
       - name: Update feeds
@@ -115,7 +114,6 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          [ -e files ] && mv files ${{ env.TARGET_MATRIX }}/files
           [ -e .config ] && mv $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
