@@ -104,12 +104,12 @@ jobs:
         run: |
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a
-          # clean plugins
-          rm -rf feeds/packages/utils/v2dat
-          rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
           # update golang
           rm -rf feeds/packages/lang/golang
           git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+          # clean plugins
+          rm -rf feeds/packages/utils/v2dat
+          rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
           
 
       - name: Load custom configuration
