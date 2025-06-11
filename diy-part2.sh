@@ -14,7 +14,7 @@
 # clear small duplicate packages
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-passwall
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-passwall2
-#rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-openclash
+rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-openclash
 #rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-homeproxy
 rm -rf "${TARGET_MATRIX}"/feeds/small/mihomo
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-mihomo
