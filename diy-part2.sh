@@ -19,6 +19,11 @@ rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-openclash
 rm -rf "${TARGET_MATRIX}"/feeds/small/mihomo
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-mihomo
 
+# ERROR: package/feeds/packages/rust [host] failed to build.
+# llvm.download-ci-llvm cannot be set to true on CI. Use if-unchanged instead.
+# Set Rust build arg llvm.download-ci-llvm to false.
+sed -i 's/--set=llvm\.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' "${TARGET_MATRIX}"/feeds/packages/lang/rust/Makefile
+
 # Modify default theme
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' "${TARGET_MATRIX}"/feeds/luci/collections/luci/Makefile
 
