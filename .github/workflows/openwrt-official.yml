@@ -144,6 +144,12 @@ jobs:
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
+      
+      - name: Check disk usage
+        run: |
+          df -h
+          mkdir /home/runner/tmpdir
+          export TMPDIR="/home/runner/tmpdir"
 
       - name: Compile the firmware
         id: compile
