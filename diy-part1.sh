@@ -38,13 +38,11 @@ sed -i "/helloworld/d" "feeds.conf.default"
 {
   echo "src-git kenzo https://github.com/kenzok8/openwrt-packages"
   echo "src-git small https://github.com/kenzok8/small"
-#  echo "src-git helloworld https://github.com/fw876/helloworld.git"
   echo "src-git netspeedtest https://github.com/sirpdboy/netspeedtest"
   echo "src-git diskman https://github.com/careysucci/luci-app-diskman"
-#  echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall'
-  #echo 'src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2'
   echo "src-git OpenClash https://github.com/vernesong/OpenClash"
-  #echo "src-git mihomo https://github.com/morytyann/OpenWrt-mihomo.git;main"
+  # ===== RTL8125 高性能驱动（sbwml）=====
+  echo "src-git sbwml https://github.com/sbwml/openwrt_pkgs.git;main"
 } >> "feeds.conf.default"
 
 # back to root folder

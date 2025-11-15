@@ -62,3 +62,7 @@ sed -i 's/255.255.255.0/255.255.248.0/g' "${TARGET_MATRIX}"/package/base-files/f
 
 # Modify hostname
 sed -i "s/OpenWrt/${AUTHORED_BY}/g" "${TARGET_MATRIX}"/package/base-files/files/bin/config_generate
+
+# 自动 RPS/XPS + IRQ 绑定脚本
+cp -f diy/common/netopt.sh "${TARGET_MATRIX}"/package/base-files/files/etc/init.d/netopt
+chmod +x "${TARGET_MATRIX}"/package/base-files/files/etc/init.d/netopt
