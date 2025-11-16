@@ -100,7 +100,7 @@ jobs:
         run: |
           df -hT $PWD
           git clone $REPO_URL -b $REPO_BRANCH ${{ env.TARGET_MATRIX }}
-          ln -sf /workdir/${{ env.TARGET_MATRIX }} {{GITHUB_WORKSPACE}}/${{ env.TARGET_MATRIX }}
+          ln -sf /workdir/${{ env.TARGET_MATRIX }} $GITHUB_WORKSPACE/${{ env.TARGET_MATRIX }}
 
       - name: Free up disk space
         env:
@@ -128,11 +128,11 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          [ -e .config ] && cp -f {{GITHUB_WORKSPACE}}/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
+          [ -e .config ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
-          cp -f {{GITHUB_WORKSPACE}}/${{ env.CONFIG_FILE }} .config
+          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           make defconfig
 
       - name: SSH Enabled Debug
@@ -146,7 +146,7 @@ jobs:
         id: package
         run: |
           cd ${{ env.TARGET_MATRIX }}
-          cp -f .config {{GITHUB_WORKSPACE}}/diy/common/.config
+          cp -f .config $GITHUB_WORKSPACE/diy/common/.config
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
