@@ -124,7 +124,7 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          [ -e .config ] && mv $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
+          [ -e .config ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
