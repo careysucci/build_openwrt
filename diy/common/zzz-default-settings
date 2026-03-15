@@ -34,7 +34,7 @@ uci set dhcp.lan.ra_default='1'
 uci commit dhcp
 
 uci set network.lan.ipaddr='172.16.3.18'
-uci set network.lan.netmask='255.255.255.0'
+uci set network.lan.netmask='255.255.248.0'
 uci set network.lan.ip6assign='64'
 uci commit network
 
