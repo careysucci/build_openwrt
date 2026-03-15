@@ -172,7 +172,7 @@ jobs:
           cd ${{ env.TARGET_MATRIX }}
           mkdir -p files/etc/config
           mkdir -p files/etc/uci-defaults
-          cp -f ${{ env.CONFIG_FIREWALL_FILE }} files/etc/config/firewall
+          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FIREWALL_FILE }} files/etc/config/firewall
 
       - name: Check disk usage
         run: |
