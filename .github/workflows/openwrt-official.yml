@@ -39,6 +39,7 @@ env:
   REPO_BRANCH: ${{ inputs.branch }}
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: diy/x86/official_auto.config
+  CONFIG_FIREWALL_FILE: diy/package/firewall
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: false
@@ -159,6 +160,15 @@ jobs:
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
+          make download -j$(($(nproc)+1))
+
+      - name: Config system
+        id: config_system
+        run: |
+          cd ${{ env.TARGET_MATRIX }}
+          mkdir -p files/etc/config
+          mkdir -p files/etc/uci-defaults
+          cp -f ${{ env.CONFIG_FIREWALL_FILE }} files/etc/config/firewall
       
       - name: Check disk usage
         run: |
