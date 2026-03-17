@@ -145,7 +145,6 @@ jobs:
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
           cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
-          make defconfig
           ./scripts/feeds update -a && ./scripts/feeds install -a
           make defconfig
 
