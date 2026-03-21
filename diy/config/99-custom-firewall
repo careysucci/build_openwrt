@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# offloading
+uci add firewall.@defaults[0].flow_offloading='1'
+uci add firewall.@defaults[0].flow_offloading_hw='0'
+
+# wan zone
+for i  in $(uci show firewall | grep "=zone" | cut -d. -f2 | cut -d= -f1); do
+  name = $(uci get firewall.$i.name)
+  if [ "$name" = "wan" ]; then
+    uci set firewall.$i.masq='1'
+    uci set firewall.$i.mtu_fix='1'
+  fi
+done
+
+# make it works
+uci commit firewall
+exit 0
