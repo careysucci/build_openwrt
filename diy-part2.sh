@@ -10,6 +10,13 @@
 # See /LICENSE for more information.
 #
 
+# Fix kmod-nf-ipt conflicts for Linux 6.12+
+if [ -f "$GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh" ]; then
+    echo "[DIY] Fixing kmod-nf-ipt conflicts..."
+    chmod +x "$GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh"
+    "$GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh"
+fi
+
 
 # clear small duplicate packages
 rm -rf "${TARGET_MATRIX}"/feeds/small/luci-app-passwall

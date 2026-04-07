@@ -149,6 +149,13 @@ jobs:
           cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           make defconfig
 
+      - name: Fix kmod-nf-ipt conflicts for Linux 6.12+
+        run: |
+          cd ${{ env.TARGET_MATRIX }}
+          chmod +x $GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh
+          $GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh
+          make defconfig
+
       - name: SSH Enabled Debug
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
         uses: mxschmitt/action-tmate@v3
