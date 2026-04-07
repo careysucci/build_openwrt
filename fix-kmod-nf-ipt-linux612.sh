@@ -11,7 +11,7 @@ set -e
 
 # Get the target OpenWrt directory
 TARGET_DIR="${TARGET_MATRIX:-.}"
-CONFIG_FILE="${TARGET_DIR}/.config"
+CONFIG_FILE="${CONFIG_FILE}"
 
 echo "[INFO] Checking for Linux 6.12+ kernel compatibility..."
 
