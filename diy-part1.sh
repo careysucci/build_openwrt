@@ -37,11 +37,37 @@ fi
 
 # ===== Add homeproxy feed (both official and LEDE) =====
 echo "[DIY-P1] Adding homeproxy feed..."
-if [[ ! -d "feeds/luci/applications/luci-app-homeproxy" ]]; then
-    mkdir -p "feeds/luci/applications/luci-app-homeproxy"
-    echo "[DIY-P1] Created folder: feeds/luci/applications/luci-app-homeproxy"
+HOMEPROXY_PATH="feeds/luci/applications/luci-app-homeproxy"
+
+# Check if already exists and is a valid git repo
+if [ -d "$HOMEPROXY_PATH/.git" ]; then
+    echo "[DIY-P1] homeproxy already exists - updating..."
+    cd "$HOMEPROXY_PATH" || exit
+    if git pull origin master 2>/dev/null; then
+        echo "[DIY-P1] homeproxy updated successfully"
+    else
+        echo "[WARNING] Failed to update homeproxy - existing version may be stale"
+    fi
+    cd - || exit
+elif [ -d "$HOMEPROXY_PATH" ]; then
+    echo "[DIY-P1] homeproxy directory exists but is not a git repo - removing and cloning fresh..."
+    rm -rf "$HOMEPROXY_PATH"
+    if git clone -b master https://github.com/immortalwrt/homeproxy.git "$HOMEPROXY_PATH" 2>&1; then
+        echo "[DIY-P1] homeproxy cloned successfully"
+    else
+        echo "[ERROR] Failed to clone homeproxy - check network connection or repository availability"
+        exit 1
+    fi
+else
+    echo "[DIY-P1] Cloning homeproxy fresh..."
+    mkdir -p "$(dirname "$HOMEPROXY_PATH")"
+    if git clone -b master https://github.com/immortalwrt/homeproxy.git "$HOMEPROXY_PATH" 2>&1; then
+        echo "[DIY-P1] homeproxy cloned successfully"
+    else
+        echo "[ERROR] Failed to clone homeproxy - check network connection or repository availability"
+        exit 1
+    fi
 fi
-git clone -b master https://github.com/immortalwrt/homeproxy.git feeds/luci/applications/luci-app-homeproxy 2>/dev/null || echo "[DIY-P1] homeproxy already exists or network issue"
 
 # ===== Clean a feed source =====
 echo "[DIY-P1] Cleaning helloworld feed source..."
