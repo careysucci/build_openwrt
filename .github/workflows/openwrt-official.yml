@@ -81,7 +81,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.25'
+          go-version: 'latest'  # Now uses the absolute latest Go version
 
       - name: Initialization environment
         env:
