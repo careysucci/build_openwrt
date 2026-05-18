@@ -78,11 +78,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 'latest'  # Now uses the absolute latest Go version
-
       - name: Initialization environment
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -135,7 +130,7 @@ jobs:
           ./scripts/feeds update -a && ./scripts/feeds install -a
           # update golang
           rm -rf feeds/packages/lang/golang
-          git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+          git clone https://github.com/kenzok8/golang -b 1.25 feeds/packages/lang/golang
           # clean plugins
           rm -rf feeds/packages/utils/v2dat
           rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
