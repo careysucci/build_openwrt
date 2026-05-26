@@ -26,6 +26,14 @@ on:
         type: boolean
         required: false
         default: false
+      golang_verson:
+        description: 'golang version'
+        type: choice
+        required: true
+        options:
+          - 1.26
+          - 1.25
+          - 1.24
       branch:
         description: 'repo branch'
         type: choice
@@ -130,7 +138,7 @@ jobs:
           ./scripts/feeds update -a && ./scripts/feeds install -a
           # update golang
           rm -rf feeds/packages/lang/golang
-          git clone https://github.com/kenzok8/golang -b 1.25 feeds/packages/lang/golang
+          git clone https://github.com/kenzok8/golang -b ${{inputs.golang_verson}} feeds/packages/lang/golang
           # clean plugins
           rm -rf feeds/packages/utils/v2dat
           rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
