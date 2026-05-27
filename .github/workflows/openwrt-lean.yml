@@ -123,9 +123,15 @@ jobs:
         run: |
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
-          # update golang
+          # update golang — use selected branch if provided (workflow_dispatch),
+          # otherwise clone latest (repository_dispatch has no inputs)
           rm -rf feeds/packages/lang/golang
-          git clone https://github.com/kenzok8/golang -b ${{inputs.golang_verson}} feeds/packages/lang/golang
+          GOLANG_VER="${{ inputs.golang_verson }}"
+          if [ -n "$GOLANG_VER" ]; then
+            git clone https://github.com/kenzok8/golang -b "$GOLANG_VER" feeds/packages/lang/golang
+          else
+            git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
+          fi
           # clean plugins
           rm -rf feeds/packages/utils/v2dat
           rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
@@ -215,7 +221,6 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           touch release.txt
-          [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release

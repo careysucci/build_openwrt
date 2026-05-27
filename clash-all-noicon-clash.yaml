@@ -57,7 +57,8 @@ dns:
   listen: 0.0.0.0:7874
   ipv6: true                       # 开启IPv6 DNS，返回AAAA记录，配合IPv6代理使用
   enhanced-mode: redir-host        # redir-host: 配合内网AdGuardHome，外国域名经.6解析(广告过滤)，国内经.7
-  respect-rules: true              # DNS查询本身也走规则，.6的上游(8.8.4.4等)经代理，无DNS泄漏
+  respect-rules: false             # 关闭：.6流量已由nftables tproxy在内核层拦截并走代理，无需Clash内部二次规则匹配
+                                   # 效果：消除每次DNS查询的双重规则遍历开销，显著降低延迟
   fake-ip-range: 198.20.0.1/16
   default-nameserver:              # 启动引导DNS，.7优先(内网直达，不依赖代理)
     - 172.16.3.7
@@ -90,11 +91,14 @@ dns:
 ipv6: true                         # 开启IPv6代理支持，国内IPv6直连，国外IPv6走代理
 
 # ========================
-# TUN 模块
+# TUN 模块（已禁用）
 # ========================
+# OpenWrt + OpenClash 使用 nftables tproxy 模式拦截流量，无需 TUN
+# 同时启用 TUN 和 tproxy 会导致双重拦截，增加 CPU 开销和延迟
+# 如需切换为 TUN 模式，需同时在 OpenClash UCI 更改 operation_mode
 tun:
-  enable: true
-  stack: mixed                     # mixed: 系统TCP + gVisor UDP，比纯system栈性能更好
+  enable: false
+  stack: mixed
   device: utun
   endpoint-independent-nat: true
   auto-route: true
@@ -108,10 +112,10 @@ tun:
     - 192.168.0.0/16
     - 224.0.0.0/4
     - 240.0.0.0/4
-    - "::1/128"        # IPv6 loopback
-    - "fc00::/7"       # IPv6 ULA 私有地址
-    - "fe80::/10"      # IPv6 链路本地地址
-    - "ff00::/8"       # IPv6 组播地址
+    - "::1/128"
+    - "fc00::/7"
+    - "fe80::/10"
+    - "ff00::/8"
 
 profile:
   store-selected: true

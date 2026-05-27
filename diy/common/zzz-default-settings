@@ -7,7 +7,7 @@ uci set luci.main.lang=zh_cn
 #uci set luci.main.mediaurlbase=/luci-static/bootstrap_mod
 uci commit luci
 
-uci set system.@system[0].timezone=UTC+08
+uci set system.@system[0].timezone=CST-8
 uci set system.@system[0].zonename=Asia/Hong_Kong
 uci commit system
 
@@ -42,9 +42,12 @@ uci commit network
 #sed -i '/REDIRECT --to-ports 53/d' /etc/firewall.user
 #echo "# iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53" >> /etc/firewall.user
 
-sed -i '/option disabled/d' /etc/config/wireless
-sed -i '/set wireless.radio${devidx}.disabled/d' /lib/wifi/mac80211.sh
-wifi up
+sed -i '/option disabled/d' /etc/config/wireless 2>/dev/null || true
+sed -i '/set wireless.radio${devidx}.disabled/d' /lib/wifi/mac80211.sh 2>/dev/null || true
+# Only bring up wifi if wireless hardware is actually present (x86 has none)
+if [ -d /sys/class/ieee80211 ] && ls /sys/class/ieee80211/ 2>/dev/null | grep -q .; then
+    wifi up 2>/dev/null || true
+fi
 
 sed -i '/DISTRIB_REVISION/d' /etc/openwrt_release
 echo "DISTRIB_REVISION='v$(date +'%Y.%m.%d')'" >> /etc/openwrt_release
@@ -53,11 +56,14 @@ echo "DISTRIB_RELEASE='v$(date +'%Y.%m.%d')'" >> /etc/openwrt_release
 sed -i '/DISTRIB_DESCRIPTION/d' /etc/openwrt_release
 echo "DISTRIB_DESCRIPTION='Openwrt '" >> /etc/openwrt_release
 
-sed -i "s/LuCI Master/Wy.House/g" /usr/lib/lua/luci/version.lua
-sed -i "s/LuCI openwrt-23.05/Wy.House/g" /usr/lib/lua/luci/version.lua
-sed -i "s/LuCI openwrt 23.05-SNAPSHOT/Wy.House/g" /usr/lib/lua/luci/version.lua
-sed -i '/luciversion/d' /usr/lib/lua/luci/version.lua
-echo "luciversion ='$(date +'%m.%d')'" >> /usr/lib/lua/luci/version.lua
+sed -i "s/LuCI Master/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
+sed -i "s/LuCI openwrt-23.05/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
+sed -i "s/LuCI openwrt 23.05-SNAPSHOT/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
+sed -i "s/LuCI openwrt-24.10/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
+sed -i "s/LuCI openwrt-25.12/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
+sed -i "s/LuCI openwrt [0-9][0-9]\.[0-9][0-9]/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
+sed -i '/luciversion/d' /usr/lib/lua/luci/version.lua 2>/dev/null || true
+echo "luciversion ='$(date +'%m.%d')'" >> /usr/lib/lua/luci/version.lua 2>/dev/null || true
 
 # 删除状态页不需显示的
 rm -rf /usr/lib/lua/luci/view/admin_status/index
@@ -80,5 +86,16 @@ sed -i.bak '/^option overlay_root \/overlay/s/^/#/' /etc/opkg.conf
 sed -i.bak '/_smpackage/s#https://[^ ]*/packages/x86_64/smpackage#https://op.dllkids.xyz/packages/x86_64/#g' /etc/opkg/distfeeds.conf
 
 rm -rf /tmp/luci-*cache
+
+# Ensure netopt starts on boot (backup for rc.d symlink baked in image)
+/etc/init.d/netopt enable 2>/dev/null || true
+
+# Disable flow offloading by default.
+# shortcut-fe (kmod-shortcut-fe) and nft flow offload conflict with OpenClash tproxy:
+# both bypass netfilter, making tproxy rules invisible to the kernel.
+# To use TurboACC/SFE for max throughput: disable OpenClash first, then enable here.
+uci set firewall.@defaults[0].flow_offloading='0'
+uci set firewall.@defaults[0].flow_offloading_hw='0'
+uci commit firewall
 
 exit 0
