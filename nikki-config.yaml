@@ -1,9 +1,10 @@
 # ========================
-# Clash-ALL 优化配置
+# Nikki (mihomo) 优化配置
 # ========================
+# 与 clash-all-noicon-clash.yaml 保持相同的分流逻辑和防泄漏策略
+# 适用于 luci-app-nikki (OpenWrt mihomo 前端)
 
 # 机场节点订阅
-
 proxy-providers:
   cc-auto:
     url: ""
@@ -12,63 +13,62 @@ proxy-providers:
     health-check:
       enable: true
       url: https://www.gstatic.com/generate_204
-      interval: 300                # 5分钟检测一次，及时剔除慢节点
-
+      interval: 300
 
 proxies:
   - { name: 直连, type: direct }
   - { name: 拒绝, type: reject }
 
 # ========================
-# 主要端口设置
+# 主要端口设置（OpenClash +1，避免冲突）
 # ========================
-port: 7890
-socks-port: 7891
-redir-port: 7892
-mixed-port: 7893
-tproxy-port: 7895
-
-#geodata-mode: true
-#geodata-loader: standard
-#geox-url:
-#  geoip: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
-#  geosite: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
-#  mmdb: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
+port: 7900
+socks-port: 7901
+redir-port: 7902
+mixed-port: 7903
+tproxy-port: 7905
 
 allow-lan: true
 mode: rule
 unified-delay: true
 tcp-concurrent: true
-find-process-mode: 'off'           # 关闭进程识别，OpenWrt上无意义，消除每连接的进程查找开销
-keep-alive-interval: 30            # TCP keepalive 30秒，维持长连接减少重连
-keep-alive-idle: 600               # 空闲连接600秒后才开始探测，减少无用探测包
-global-client-fingerprint: chrome  # TLS fingerprint统一为chrome，减少指纹协商开销
+find-process-mode: 'off'
+keep-alive-interval: 30
+keep-alive-idle: 600
+global-client-fingerprint: chrome
 log-level: warning
 
-external-controller: 127.0.0.1:9090
+geodata-mode: true
+geodata-loader: standard
+geox-url:
+  geoip: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
+  geosite: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+  mmdb: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
+
+
+external-controller: 127.0.0.1:9091
 external-ui: ui
 external-ui-name: metacubed
 external-ui-url: "https://gh-proxy.org/https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
-secret: "oc_6Qf9v2LmP8xT4rN1kY7sDz3aH5uWc"
+secret: "nk_7Xm2pQ9wR4tK8vL1nJ6cF3bA5yD0e"
 
 # ========================
 # DNS 设置
 # ========================
 dns:
   enable: true
-  listen: 0.0.0.0:7874
-  ipv6: true                       # 开启IPv6 DNS，返回AAAA记录，配合IPv6代理使用
-  enhanced-mode: redir-host        # redir-host: 配合内网AdGuardHome，外国域名经.6解析(广告过滤)，国内经.7
-  respect-rules: false             # 关闭：.6流量已由nftables tproxy在内核层拦截并走代理，无需Clash内部二次规则匹配
-                                   # 效果：消除每次DNS查询的双重规则遍历开销，显著降低延迟
+  listen: 0.0.0.0:7884
+  ipv6: true
+  enhanced-mode: redir-host
+  respect-rules: false
   fake-ip-range: 198.20.0.1/16
-  default-nameserver:              # 启动引导DNS，.7优先(内网直达，不依赖代理)
+  default-nameserver:
     - 172.16.3.7
     - 172.16.3.6
   nameserver:
-    - 172.16.3.6                   # 默认用.6(外国AdGuardHome)解析外国域名，广告过滤生效
-  proxy-server-nameserver:         # 解析代理节点域名专用，直连可达，打破循环依赖
-    - 172.16.3.7                   # 国内AdGuardHome，内网直达不依赖代理，隐藏真实查询来源
+    - 172.16.3.6
+  proxy-server-nameserver:
+    - 172.16.3.7
   nameserver-policy:
     "+.lan":
       - 172.16.3.7
@@ -78,45 +78,22 @@ dns:
       - 172.16.3.7
     "geosite:cn":
       - 172.16.3.7
-
   fake-ip-filter-mode: blacklist
   fake-ip-filter:
     - "+.lan"
     - "+.local"
     - "geosite:cn"
-    # holytech
     - "+.holytech.bid"
     - "+.holytechx.com"
 
-
-ipv6: true                         # 开启IPv6代理支持，国内IPv6直连，国外IPv6走代理
+ipv6: true
 
 # ========================
-# TUN 模块（已禁用）
+# TUN 模块（已禁用，使用 tproxy）
 # ========================
-# OpenWrt + OpenClash 使用 nftables tproxy 模式拦截流量，无需 TUN
-# 同时启用 TUN 和 tproxy 会导致双重拦截，增加 CPU 开销和延迟
-# 如需切换为 TUN 模式，需同时在 OpenClash UCI 更改 operation_mode
 tun:
   enable: false
   stack: mixed
-  device: utun
-  endpoint-independent-nat: true
-  auto-route: true
-  auto-detect-interface: true
-  auto-redirect: true
-  strict-route: true
-  route-exclude-address:
-    - 10.0.0.0/8
-    - 127.0.0.0/8
-    - 172.16.0.0/12
-    - 192.168.0.0/16
-    - 224.0.0.0/4
-    - 240.0.0.0/4
-    - "::1/128"
-    - "fc00::/7"
-    - "fe80::/10"
-    - "ff00::/8"
 
 profile:
   store-selected: true
@@ -182,7 +159,7 @@ proxy-groups:
 # 规则引擎（rules）
 # ========================
 rules:
-  - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve   # 国内DNS服务器(.7)直连，上游为国内DNS无需代理
+  - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve
   - RULE-SET,TEST/Domain,Test
   - RULE-SET,ChatGPT/Domain,ChatGPT
   - RULE-SET,Claude/Domain,Claude
@@ -226,18 +203,17 @@ rules:
   - RULE-SET,GeoLocation-!CN/Domain,国外
   - RULE-SET,Proxy/Domain,国外
   - RULE-SET,Globe/Domain,国外
-  # 局域网/保留地址直连
   - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
   - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
   - IP-CIDR,240.0.0.0/4,DIRECT,no-resolve
-  # IPv6 本地地址直连（其余 IPv6 跟随规则：国内直连，国外代理）
-  - IP-CIDR6,::1/128,DIRECT,no-resolve       # loopback 直连
-  - IP-CIDR6,fc00::/7,DIRECT,no-resolve      # ULA 私有地址直连
-  - IP-CIDR6,fe80::/10,DIRECT,no-resolve     # 链路本地地址直连
+  - IP-CIDR6,::1/128,DIRECT,no-resolve
+  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
+  - IP-CIDR6,fe80::/10,DIRECT,no-resolve
   - MATCH,国外
+
 # ========================
 # 规则集提供者
 # ========================
@@ -252,7 +228,6 @@ rule-providers:
   Claude/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Claude/Claude.list" }
   Meta AI/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/MetaAi.list" }
   Perplexity/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/perplexity.mrs" }
-  Copilot/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Copilot.list" }
   Gemini/Domain: { <<: *domain, url: "https://gh-proxy.org/https://raw.githubusercontent.com/metacubex/meta-rules-dat/refs/heads/meta/geo/geosite/google-gemini.mrs" }
   GitHub/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/github.mrs" }
   Telegram/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/telegram.mrs" }
@@ -288,12 +263,7 @@ rule-providers:
   Private/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/private.mrs" }
   Private/IP: { <<: *ip, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geoip/private.mrs" }
   GeoLocation-!CN/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/geolocation-!cn.mrs" }
-  Block/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Block.list" }
-  Nvidia/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Nvidia/Nvidia.list" }
-  Crunchyroll/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Crunchyroll.list" }
-  Reddit/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/reddit.mrs" }
-
   Youtube/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/youtube.mrs" }
   Google/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/google.mrs" }
   Google/IP: { <<: *ip, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geoip/google.mrs" }
-# GateFireWall/Domain: {<<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/gfw.mrs"}
+

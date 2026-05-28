@@ -120,9 +120,27 @@ if [ -f "diy/common/netopt.sh" ] && [ -d "$TARGET_DIR/package/base-files/files/e
     echo "[DIY-P2] netopt installed and enabled (S99netopt symlink created)"
 fi
 
-# ===== Install first-boot default settings =====
-# zzz-default-settings runs last (alphabetical order in uci-defaults) to override
-# any settings from OpenWrt/LEDE packages (timezone, flow offload, netopt enable, etc.)
+# ===== Install first-boot modules =====
+# Modules are sourced by zzz-default-settings at first boot.
+# Install path: /usr/lib/wyhome/modules/ (inside firmware image).
+echo "[DIY-P2] Installing first-boot modules..."
+MODULES_SRC="$GITHUB_WORKSPACE/diy/modules"
+MODULES_DST="$TARGET_DIR/package/base-files/files/usr/lib/wyhome/modules"
+mkdir -p "$MODULES_DST"
+if [ -d "$MODULES_SRC" ]; then
+    for _mod in "$MODULES_SRC"/[0-9][0-9]-*.sh; do
+        [ -f "$_mod" ] || continue
+        cp -f "$_mod" "$MODULES_DST/" || true
+        chmod +x "$MODULES_DST/$(basename $_mod)" || true
+        echo "[DIY-P2] module installed: $(basename $_mod)"
+    done
+else
+    echo "[WARNING] diy/modules/ not found, skipping module installation"
+fi
+
+# ===== Install first-boot default settings (orchestrator) =====
+# zzz-default-settings runs last (alphabetical in uci-defaults) and
+# sources all modules from /usr/lib/wyhome/modules/.
 echo "[DIY-P2] Installing zzz-default-settings..."
 mkdir -p "$TARGET_DIR/package/base-files/files/etc/uci-defaults"
 if [ -f "diy/common/zzz-default-settings" ]; then
@@ -132,45 +150,27 @@ if [ -f "diy/common/zzz-default-settings" ]; then
     echo "[DIY-P2] zzz-default-settings installed"
 fi
 
-# ===== Pre-download Clash Meta (mihomo) core =====
-# Baking the core binary into the image means OpenClash works immediately after flash.
-# core_version=linux-amd64-v1 (UCI) → use "compatible" build (broadest x86_64 support,
-# works on CPUs without SSE4.2/AVX2 — covers 4th gen Intel and all modern AMD).
-# OpenClash expects the binary at /etc/openclash/core/clash_meta (no version suffix).
-echo "[DIY-P2] Pre-downloading Clash Meta (mihomo) core..."
-CORE_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/core"
-mkdir -p "$CORE_DIR"
+# ===== LEDE-only: install default-settings =====
+# diy/common/default-settings contains LEDE-specific settings not covered by modules:
+#   root password hash, NAS menu moves, dnsmasq log suppression,
+#   wget hardening, LEDE opkg mirror, luci-modulecache cleanup.
+# Installed as 'default-settings' (runs before zzz-default-settings alphabetically).
+# Overrides kenzok's luci-app-default-settings package version if present.
+if [ "$TARGET_DIR" = "lede" ] && [ -f "diy/common/default-settings" ]; then
+    cp -f diy/common/default-settings \
+        "$TARGET_DIR/package/base-files/files/etc/uci-defaults/default-settings" || true
+    chmod +x "$TARGET_DIR/package/base-files/files/etc/uci-defaults/default-settings" || true
+    echo "[DIY-P2] default-settings (LEDE) installed"
+fi
 
-MIHOMO_VER=$(curl -fsSL \
-    -H "Accept: application/vnd.github.v3+json" \
-    "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" \
-    | grep '"tag_name"' | head -1 | cut -d'"' -f4)
-
-if [ -n "$MIHOMO_VER" ]; then
-    echo "[DIY-P2] Latest mihomo version: ${MIHOMO_VER}"
-    MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-amd64-compatible-${MIHOMO_VER}.gz"
-    if curl -fsSL -o "/tmp/clash_meta.gz" "$MIHOMO_URL"; then
-        gzip -d "/tmp/clash_meta.gz" \
-            && mv "/tmp/clash_meta" "$CORE_DIR/clash_meta" \
-            && chmod +x "$CORE_DIR/clash_meta" \
-            && echo "[DIY-P2] Clash Meta core ${MIHOMO_VER} (compatible/amd64-v1) installed" \
-            || echo "[WARNING] Failed to extract clash_meta"
-    else
-        echo "[WARNING] Failed to download: $MIHOMO_URL"
-        # Fallback: try standard amd64 build
-        MIHOMO_URL_FB="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VER}/mihomo-linux-amd64-${MIHOMO_VER}.gz"
-        if curl -fsSL -o "/tmp/clash_meta.gz" "$MIHOMO_URL_FB"; then
-            gzip -d "/tmp/clash_meta.gz" \
-                && mv "/tmp/clash_meta" "$CORE_DIR/clash_meta" \
-                && chmod +x "$CORE_DIR/clash_meta" \
-                && echo "[DIY-P2] Clash Meta core ${MIHOMO_VER} (standard amd64) installed (fallback)" \
-                || echo "[WARNING] Failed to extract clash_meta (fallback)"
-        else
-            echo "[WARNING] Both downloads failed — core will be downloaded on first run by OpenClash"
-        fi
-    fi
+# ===== OpenClash: install config + download core =====
+# Delegates to diy/scripts/build-openclash.sh (build-time only, not in image).
+echo "[DIY-P2] Running OpenClash build script..."
+if [ -f "$GITHUB_WORKSPACE/diy/scripts/build-openclash.sh" ]; then
+    # shellcheck source=diy/scripts/build-openclash.sh
+    source "$GITHUB_WORKSPACE/diy/scripts/build-openclash.sh" || true
 else
-    echo "[WARNING] Could not determine latest mihomo version — core will be downloaded by OpenClash at runtime"
+    echo "[WARNING] diy/scripts/build-openclash.sh not found, skipping"
 fi
 
 echo "[DIY-P2] DIY Part 2 completed successfully"

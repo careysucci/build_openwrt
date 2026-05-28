@@ -1,101 +1,35 @@
 #!/bin/sh
+# =============================================================
+# zzz-default-settings  (uci-defaults orchestrator)
+#
+# Runs ONCE on first boot (OpenWrt uci-defaults mechanism).
+# Delegates all configuration to numbered modules installed
+# at /usr/lib/wyhome/modules/ by diy-part2.sh at build time.
+#
+# Module execution order (alphabetical by filename):
+#   10-system.sh    — language, timezone, network, opkg, dhcp
+#   20-firewall.sh  — flow_offloading defaults
+#   30-openclash.sh — OpenClash UCI sync with clash yaml
+#   40-cleanup.sh   — disable unused services, cache cleanup
+#
+# To add new configuration: create NN-name.sh in diy/modules/
+# and it will be picked up automatically at the next build.
+# =============================================================
 
-touch /etc/crontabs/root
+MODULES_DIR="/usr/lib/wyhome/modules"
 
-uci set luci.main.lang=zh_cn
-#设置默认主题
-#uci set luci.main.mediaurlbase=/luci-static/bootstrap_mod
-uci commit luci
-
-uci set system.@system[0].timezone=CST-8
-uci set system.@system[0].zonename=Asia/Hong_Kong
-uci commit system
-
-uci set fstab.@global[0].anon_mount=1
-uci commit fstab
-
-ln -sf /sbin/ip /usr/bin/ip
-
-sed -i '/lienol/d' /etc/opkg/distfeeds.conf
-sed -i '/other/d' /etc/opkg/distfeeds.conf
-#sed -i 's/downloads.openwrt.org/openwrt.proxy.ustclug.org/g' /etc/opkg/distfeeds.conf
-#sed -i 's/http/https/g' /etc/opkg/distfeeds.conf
-sed -i "s/# //g" /etc/opkg/distfeeds.conf
-sed -i '/check_signature/d' /etc/opkg.conf
-
-#sed -i 's/root::0:0:99999:7:::/root:$1$V4UetPzk$CYXluq4wUazHjmCDBCqXF.:0:0:99999:7:::/g' /etc/shadow
-
-uci set dhcp.lan.ra='server'
-uci set dhcp.lan.dhcpv6='server'
-uci set dhcp.lan.ra_management='1'
-uci set dhcp.lan.ra_default='1'
-#uci set dhcp.@dnsmasq[0].localservice=0
-#uci set dhcp.@dnsmasq[0].nonwildcard=0
-uci commit dhcp
-
-uci set network.lan.ipaddr='172.16.3.18'
-uci set network.lan.netmask='255.255.248.0'
-uci set network.lan.ip6assign='64'
-uci commit network
-
-#DNS重定向
-#sed -i '/REDIRECT --to-ports 53/d' /etc/firewall.user
-#echo "# iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53" >> /etc/firewall.user
-
-sed -i '/option disabled/d' /etc/config/wireless 2>/dev/null || true
-sed -i '/set wireless.radio${devidx}.disabled/d' /lib/wifi/mac80211.sh 2>/dev/null || true
-# Only bring up wifi if wireless hardware is actually present (x86 has none)
-if [ -d /sys/class/ieee80211 ] && ls /sys/class/ieee80211/ 2>/dev/null | grep -q .; then
-    wifi up 2>/dev/null || true
+if [ ! -d "$MODULES_DIR" ]; then
+    echo "[zzz] WARNING: modules directory not found: $MODULES_DIR"
+    exit 0
 fi
 
-sed -i '/DISTRIB_REVISION/d' /etc/openwrt_release
-echo "DISTRIB_REVISION='v$(date +'%Y.%m.%d')'" >> /etc/openwrt_release
-sed -i '/DISTRIB_RELEASE/d' /etc/openwrt_release
-echo "DISTRIB_RELEASE='v$(date +'%Y.%m.%d')'" >> /etc/openwrt_release
-sed -i '/DISTRIB_DESCRIPTION/d' /etc/openwrt_release
-echo "DISTRIB_DESCRIPTION='Openwrt '" >> /etc/openwrt_release
+for _mod in "$MODULES_DIR"/[0-9][0-9]-*.sh; do
+    [ -f "$_mod" ] || continue
+    echo "[zzz] Running module: $(basename $_mod)"
+    # Source (dot) runs in current shell — modules can set uci/env vars
+    # and share state. || true prevents set -e from aborting on module errors.
+    . "$_mod" || echo "[zzz] WARNING: $(basename $_mod) returned error (continuing)"
+done
 
-sed -i "s/LuCI Master/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
-sed -i "s/LuCI openwrt-23.05/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
-sed -i "s/LuCI openwrt 23.05-SNAPSHOT/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
-sed -i "s/LuCI openwrt-24.10/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
-sed -i "s/LuCI openwrt-25.12/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
-sed -i "s/LuCI openwrt [0-9][0-9]\.[0-9][0-9]/Wy.House/g" /usr/lib/lua/luci/version.lua 2>/dev/null || true
-sed -i '/luciversion/d' /usr/lib/lua/luci/version.lua 2>/dev/null || true
-echo "luciversion ='$(date +'%m.%d')'" >> /usr/lib/lua/luci/version.lua 2>/dev/null || true
-
-# 删除状态页不需显示的
-rm -rf /usr/lib/lua/luci/view/admin_status/index
-#mv -f /usr/lib/lua/luci/view/admin_status/index /usr/lib/lua/luci/view/admin_status/index_backup 2>/dev/null
-
-#禁用某些可能会自启动且用不上的依赖包服务
-/etc/init.d/php7-fastcgi disable 2>/dev/null
-/etc/init.d/php7-fpm disable 2>/dev/null
-/etc/init.d/php8-fastcgi disable 2>/dev/null
-/etc/init.d/php8-fpm disable 2>/dev/null
-/etc/init.d/softethervpnbridge disable 2>/dev/null
-/etc/init.d/softethervpnserver disable 2>/dev/null
-/etc/init.d/softethervpnclient disable 2>/dev/null
-/etc/init.d/haproxy disable 2>/dev/null
-/etc/init.d/kcptun disable 2>/dev/null
-
-chmod 0755 /etc/init.d/*
-
-sed -i.bak '/^option overlay_root \/overlay/s/^/#/' /etc/opkg.conf
-sed -i.bak '/_smpackage/s#https://[^ ]*/packages/x86_64/smpackage#https://op.dllkids.xyz/packages/x86_64/#g' /etc/opkg/distfeeds.conf
-
-rm -rf /tmp/luci-*cache
-
-# Ensure netopt starts on boot (backup for rc.d symlink baked in image)
-/etc/init.d/netopt enable 2>/dev/null || true
-
-# Disable flow offloading by default.
-# shortcut-fe (kmod-shortcut-fe) and nft flow offload conflict with OpenClash tproxy:
-# both bypass netfilter, making tproxy rules invisible to the kernel.
-# To use TurboACC/SFE for max throughput: disable OpenClash first, then enable here.
-uci set firewall.@defaults[0].flow_offloading='0'
-uci set firewall.@defaults[0].flow_offloading_hw='0'
-uci commit firewall
-
+echo "[zzz] All modules completed"
 exit 0
