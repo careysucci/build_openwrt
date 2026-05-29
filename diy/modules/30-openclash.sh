@@ -86,9 +86,12 @@ uci set openclash.config.router_self_proxy='1'
     uci set openclash.config.china_ip_route='1'
 
     # --- Bypass LAN (performance) ─────────────────────────────────
-    # Skip proxy for inter-LAN traffic (172.16.x.x ↔ 172.16.x.x)
+    # skip_proxy_address=0: DISABLE automatic address bypass.
+    # When enabled, OpenClash may add nftables bypass rules for DNS server IPs
+    # (including .6), causing .6's upstream traffic (8.8.4.4) to go DIRECT → timeout.
+    # We handle bypass manually via yaml rules (SRC-IP-CIDR for .7 DIRECT, .6 proxy).
     uci set openclash.config.bypass_gateway_compatible='0'
-    uci set openclash.config.skip_proxy_address='1'
+    uci set openclash.config.skip_proxy_address='0'
 
 # ── TUN / stack ───────────────────────────────────────────────
 # yaml: tun.enable: false  (tproxy-only mode, TUN disabled)

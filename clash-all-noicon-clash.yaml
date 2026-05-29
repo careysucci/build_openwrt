@@ -62,9 +62,8 @@ dns:
   respect-rules: false             # 关闭：.6流量已由nftables tproxy在内核层拦截并走代理，无需Clash内部二次规则匹配
                                    # 效果：消除每次DNS查询的双重规则遍历开销，显著降低延迟
   fake-ip-range: 198.20.0.1/16
-  default-nameserver:              # 启动引导DNS，.7优先(内网直达，不依赖代理)
+  default-nameserver:              # 启动引导DNS，仅.7(内网直达，不依赖代理)
     - 172.16.3.7
-    - 172.16.3.6
   nameserver:
     - 172.16.3.6                   # 默认用.6(外国AdGuardHome)解析外国域名，广告过滤生效
   proxy-server-nameserver:         # 解析代理节点域名专用，直连可达，打破循环依赖
@@ -77,6 +76,17 @@ dns:
     "geosite:private":
       - 172.16.3.7
     "geosite:cn":
+      - 172.16.3.7
+    # Speedtest domains → use domestic DNS to resolve to nearest CN CDN node
+    "+.speedtest.net":
+      - 172.16.3.7
+    "+.speedtest.cn":
+      - 172.16.3.7
+    "+.fast.com":
+      - 172.16.3.7
+    "+.nflxvideo.net":
+      - 172.16.3.7
+    "+.speed.cloudflare.com":
       - 172.16.3.7
 
   fake-ip-filter-mode: blacklist
@@ -183,6 +193,7 @@ proxy-groups:
 # ========================
 rules:
   - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve   # 国内DNS服务器(.7)直连，上游为国内DNS无需代理
+  - SRC-IP-CIDR,172.16.3.6/32,国外,no-resolve      # 国外DNS服务器(.6)强制走代理，确保8.8.4.4等可达
   - RULE-SET,TEST/Domain,Test
   - RULE-SET,ChatGPT/Domain,ChatGPT
   - RULE-SET,Claude/Domain,Claude

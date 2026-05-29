@@ -64,7 +64,6 @@ dns:
   fake-ip-range: 198.20.0.1/16
   default-nameserver:
     - 172.16.3.7
-    - 172.16.3.6
   nameserver:
     - 172.16.3.6
   proxy-server-nameserver:
@@ -160,6 +159,7 @@ proxy-groups:
 # ========================
 rules:
   - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve
+  - SRC-IP-CIDR,172.16.3.6/32,国外,no-resolve
   - RULE-SET,TEST/Domain,Test
   - RULE-SET,ChatGPT/Domain,ChatGPT
   - RULE-SET,Claude/Domain,Claude
