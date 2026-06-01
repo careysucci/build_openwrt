@@ -20,7 +20,9 @@
 
 # ── 1. Install OpenClash YAML config ─────────────────────────
 _OC_CFG_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/config"
-_OC_PROV_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/providers"
+# proxy-provider 本地订阅目录，必须与 yaml 内 proxy-providers.cc-auto.path 一致：
+#   /etc/openclash/config/providers/cc-auto.yaml
+_OC_PROV_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/config/providers"
 mkdir -p "$_OC_CFG_DIR" "$_OC_PROV_DIR"
 
 _YAML_SRC="$GITHUB_WORKSPACE/clash-all-noicon-clash.yaml"
@@ -36,6 +38,9 @@ fi
 # Profile name set in UCI as 'nikki-config' (see 35-nikki.sh module)
 _NK_PROF_DIR="$TARGET_DIR/package/base-files/files/etc/nikki/profiles"
 mkdir -p "$_NK_PROF_DIR"
+# Nikki proxy-provider 本地订阅目录，与 nikki-config.yaml 内 path 一致：
+#   /etc/nikki/run/providers/cc-auto.yaml
+mkdir -p "$TARGET_DIR/package/base-files/files/etc/nikki/run/providers"
 _NK_YAML_SRC="$GITHUB_WORKSPACE/nikki-config.yaml"
 if [ -f "$_NK_YAML_SRC" ]; then
     cp -f "$_NK_YAML_SRC" "$_NK_PROF_DIR/nikki-config.yaml"
@@ -43,6 +48,27 @@ if [ -f "$_NK_YAML_SRC" ]; then
 else
     echo "[build-openclash] WARNING: nikki-config.yaml not found, skipping"
 fi
+
+# ── 1c. Inject subscription URL (open-box ready) ─────────────
+# Fill the airport subscription URL once via env var / GitHub Secret CLASH_SUB_URL.
+# The placeholder __CLASH_SUB_URL__ in the YAML is replaced at build time so the
+# flashed firmware can fetch + auto-update nodes (proxy-providers interval: 86400).
+# If unset, the placeholder is kept — fill it later in the OpenClash/Nikki web UI
+# or by editing the installed YAML on the device.
+_inject_sub_url() {
+    _isu_file="$1"
+    [ -f "$_isu_file" ] || return 0
+    if [ -n "${CLASH_SUB_URL:-}" ]; then
+        # '|' delimiter (URLs contain '/'); escape sed-special chars in the URL.
+        _isu_esc=$(printf '%s' "$CLASH_SUB_URL" | sed -e 's/[&|\\]/\\&/g')
+        sed -i "s|__CLASH_SUB_URL__|$_isu_esc|g" "$_isu_file"
+        echo "[build-openclash] Subscription URL injected → $_isu_file"
+    else
+        echo "[build-openclash] NOTE: CLASH_SUB_URL not set — placeholder kept in $_isu_file"
+    fi
+}
+_inject_sub_url "$_OC_CFG_DIR/clash-all-noicon-clash.yaml"
+_inject_sub_url "$_NK_PROF_DIR/nikki-config.yaml"
 
 # ── 2. Pre-download Clash Meta (mihomo) core ─────────────────
 # Compatible build: broadest x86_64 support (no SSE4.2/AVX2 requirement).
@@ -91,6 +117,6 @@ fi
 
 # Clean up temp vars (sourced into parent scope)
 unset _OC_CFG_DIR _OC_PROV_DIR _YAML_SRC _CORE_DIR _NK_PROF_DIR _NK_YAML_SRC
-unset _MIHOMO_VER _BASE
-unset -f _try_download_core 2>/dev/null || true
+unset _MIHOMO_VER _BASE _isu_file _isu_esc
+unset -f _try_download_core _inject_sub_url 2>/dev/null || true
 

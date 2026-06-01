@@ -7,8 +7,12 @@
 # 机场节点订阅
 proxy-providers:
   cc-auto:
-    url: ""
+    # 在线订阅 + 本地缓存（同 OpenClash）：开箱即用，自动定期更新。
+    # url 由 build-openclash.sh 用环境变量 CLASH_SUB_URL 注入；path 为本地缓存，
+    # 支持首次手动 bootstrap 一次，之后按 interval 全自动更新。
     type: http
+    url: "__CLASH_SUB_URL__"
+    path: "/etc/nikki/run/providers/cc-auto.yaml"
     interval: 86400
     health-check:
       enable: true

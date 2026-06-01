@@ -534,25 +534,53 @@ proxy-server-nameserver:
 
 ### 问题四：订阅鸡蛋问题
 
-**症状：** 订阅 URL 是境外地址，需要代理下载；但无节点无法代理 → 循环
+**症状：** 订阅 URL 是境外地址，需要代理下载；但无节点无法代理 → 循环。
+首次启动节点数为 0、无法访问国外网站。
 
-**解决：**
+**设计目标：** 开箱填一次订阅地址即用；自动定期更新；最多首次手动 bootstrap 一次，之后永不手动介入。
+
+**provider 正确写法（本仓库已默认配置）：** `type: http` 提供 `url` 自动定期更新，同时用
+`path` 做本地缓存——mihomo 启动时先读缓存（节点立即可用），再后台按 `interval` 自动更新：
+
+```yaml
+proxy-providers:
+  cc-auto:
+    type: http
+    url: "你的机场订阅地址"           # 构建时由 CLASH_SUB_URL 注入，或刷机后在界面/YAML 填写
+    path: "/etc/openclash/config/providers/cc-auto.yaml"   # 本地缓存
+    interval: 86400                  # 每 24 小时自动更新
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+```
+
+**开箱即用：填一次订阅地址**
+
+- 方式 A（推荐，构建时注入）：在 GitHub 仓库 Settings → Secrets and variables → Actions
+  新增变量/密钥 `CLASH_SUB_URL`，值为订阅地址。`build-openclash.sh` 会把 YAML 里的占位符
+  `__CLASH_SUB_URL__` 替换为该地址，刷机即用。
+- 方式 B（刷机后）：在 OpenClash 界面或编辑
+  `/etc/openclash/config/clash-all-noicon-clash.yaml`，把 `url` 改成订阅地址。
+
+**首次 bootstrap（仅当订阅地址需代理才能下载时，做一次）：**
 ```bash
 # 停止 OpenClash（绕开 tproxy）
 /etc/init.d/openclash stop
 
-# 手动下载订阅
+# 手动下载订阅到 path 指定的缓存文件（仅这一次）
 mkdir -p /etc/openclash/config/providers
-curl -L -o /etc/openclash/config/providers/cc-auto.yaml "https://subs.bid"
+curl -L -o /etc/openclash/config/providers/cc-auto.yaml "你的机场订阅地址"
 
-# 确认文件正确
-head -3 /etc/openclash/config/providers/cc-auto.yaml
+# 确认是 clash 格式且含 proxies 列表
+grep -c '^\s*-\s' /etc/openclash/config/providers/cc-auto.yaml   # 节点条目数应 > 0
 
-# 重启 OpenClash
+# 重启：mihomo 先用缓存出网，之后按 interval 全自动更新，无需再手动介入
 /etc/init.d/openclash start
 ```
 
-> 运行稳定后，订阅按 `interval: 86400` 每24小时自动更新。
+> bootstrap 后节点已可用，mihomo 会按 `interval: 86400` 每 24 小时自动从 `url` 更新订阅；
+> 失败时保留旧缓存，不会清空节点。若订阅地址在国内可直达，则连 bootstrap 都不需要，开箱即用。
 
 **运行中强制刷新订阅：**
 ```bash
