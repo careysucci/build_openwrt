@@ -205,6 +205,8 @@ jobs:
         run: |
           cd ${{ env.TARGET_MATRIX }}/bin/targets/*/*
           rm -rf packages
+          # Remove build metadata files — keep only flashable images
+          rm -f config.buildinfo feeds.buildinfo profiles.json version.buildinfo
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
 
