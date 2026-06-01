@@ -221,6 +221,9 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           touch release.txt
+          echo "OpenWrt LEDE Build" >> release.txt
+          echo "Target: ${{ env.RELEASE_NAME }}" >> release.txt
+          echo "Date: $(date)" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
@@ -243,7 +246,7 @@ jobs:
         uses: dev-drprasad/delete-older-releases@master
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
-          keep_latest: 3
+          keep_latest: 8
           delete_tags: true
         env:
           GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
