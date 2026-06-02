@@ -122,6 +122,39 @@ uci set openclash.config.geo_update_day_time='1'
 uci set openclash.config.dashboard_type='Official'
 uci set openclash.config.yacd_type='Meta'
 
+# ── Default state: DISABLED ───────────────────────────────────
+# OpenClash requires a subscription before it can proxy traffic.
+# With 0 nodes: tproxy is active but all foreign traffic (including .6 DNS
+# upstreams like 1.1.1.1:443) finds no proxy → timeout → broken internet.
+# Solution: ship as disabled. User fills subscription URL via OpenClash UI,
+# then enables. Until then: no tproxy → dnsmasq uses ISP DNS → full internet.
+uci set openclash.config.enable='0'
+
 uci commit openclash
 echo "[30-openclash] UCI pre-configured to match clash-all-noicon-clash.yaml"
+/etc/init.d/openclash disable 2>/dev/null || true
+echo "[30-openclash] OpenClash disabled by default — enable after adding subscription URL"
+
+# ── Subscription (OpenClash native management) ────────────────
+# OpenClash downloads subscriptions itself before starting the core — no proxy
+# needed and no chicken-and-egg problem.  The URL is left blank here; fill it
+# in after flashing via:  OpenClash UI → 订阅设置  or:
+#   uci set openclash.@subscribe[0].url='YOUR_URL' && uci commit openclash
+#   /etc/init.d/openclash restart
+#
+# OpenClash injects the downloaded nodes into the config's proxies: list.
+# All proxy-groups use include-all: true so they pick up the nodes automatically.
+_oc_sub_idx=0
+while uci -q get "openclash.@subscribe[$_oc_sub_idx]" > /dev/null 2>&1; do
+    uci delete "openclash.@subscribe[$_oc_sub_idx]"
+done
+uci add openclash subscribe
+uci set openclash.@subscribe[-1].name='机场订阅'
+uci set openclash.@subscribe[-1].url=''
+uci set openclash.@subscribe[-1].type='0'
+uci set openclash.@subscribe[-1].enabled='1'
+uci set openclash.@subscribe[-1].auto_update='1'
+uci set openclash.@subscribe[-1].auto_update_time='2'
+uci commit openclash
+echo "[30-openclash] Subscription placeholder created (fill URL via OpenClash UI)"
 

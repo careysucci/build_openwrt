@@ -10,6 +10,8 @@
 #   10-system.sh    — language, timezone, network, opkg, dhcp
 #   20-firewall.sh  — flow_offloading defaults
 #   30-openclash.sh — OpenClash UCI sync with clash yaml
+#   35-nikki.sh     — Nikki UCI (alternate proxy, disabled by default)
+#   36-homeproxy.sh — HomeProxy UCI (alternate proxy, disabled by default)
 #   40-cleanup.sh   — disable unused services, cache cleanup
 #
 # To add new configuration: create NN-name.sh in diy/modules/

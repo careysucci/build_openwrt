@@ -7,20 +7,19 @@
 # Actions:
 #   1. Copy clash-all-noicon-clash.yaml into the image
 #   1b. Copy nikki-config.yaml into the image
-#   2. Pre-download Clash Meta core from MetaCubeX/mihomo releases
+#   1c. Inject CLASH_SUB_URL into YAML proxy-providers + Nikki/HomeProxy (if set)
+#   2. Pre-download Clash Meta core from vernesong/OpenClash releases
 #      so OpenClash works immediately after flashing.
 #
-# Core source: https://github.com/MetaCubeX/mihomo/releases
-#   mihomo-linux-amd64-compatible → amd64-v1 (broadest x86_64 support)
-#   mihomo-linux-amd64            → standard (may require newer CPU features)
-#
-# UCI core_version=linux-amd64-v1 → compatible build
-# Binary installed as /etc/openclash/core/clash_meta
+# Core source: https://github.com/vernesong/OpenClash/releases
+#   Asset: clash_meta-linux-amd64-compatible.gz  (broadest x86_64 support)
+#   UCI: core_type=Meta / core_version=linux-amd64-v1
+#   Binary installed as /etc/openclash/core/clash_meta
 # =============================================================
 
 # ── 1. Install OpenClash YAML config ─────────────────────────
 _OC_CFG_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/config"
-# proxy-provider 本地订阅目录，必须与 yaml 内 proxy-providers.cc-auto.path 一致：
+# proxy-provider 本地缓存目录，与 yaml 内 proxy-providers.cc-auto.path 一致：
 #   /etc/openclash/config/providers/cc-auto.yaml
 _OC_PROV_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/config/providers"
 mkdir -p "$_OC_CFG_DIR" "$_OC_PROV_DIR"
@@ -49,17 +48,13 @@ else
     echo "[build-openclash] WARNING: nikki-config.yaml not found, skipping"
 fi
 
-# ── 1c. Inject subscription URL (open-box ready) ─────────────
-# Fill the airport subscription URL once via env var / GitHub Secret CLASH_SUB_URL.
-# The placeholder __CLASH_SUB_URL__ in the YAML is replaced at build time so the
-# flashed firmware can fetch + auto-update nodes (proxy-providers interval: 86400).
-# If unset, the placeholder is kept — fill it later in the OpenClash/Nikki web UI
-# or by editing the installed YAML on the device.
+# ── 1c. Inject subscription URL into Nikki / HomeProxy ───────
+# OpenClash proxy-providers URL is a fixed localhost placeholder (no injection needed).
+# Nikki and HomeProxy still use __CLASH_SUB_URL__ placeholders.
 _inject_sub_url() {
     _isu_file="$1"
     [ -f "$_isu_file" ] || return 0
     if [ -n "${CLASH_SUB_URL:-}" ]; then
-        # '|' delimiter (URLs contain '/'); escape sed-special chars in the URL.
         _isu_esc=$(printf '%s' "$CLASH_SUB_URL" | sed -e 's/[&|\\]/\\&/g')
         sed -i "s|__CLASH_SUB_URL__|$_isu_esc|g" "$_isu_file"
         echo "[build-openclash] Subscription URL injected → $_isu_file"
@@ -67,56 +62,45 @@ _inject_sub_url() {
         echo "[build-openclash] NOTE: CLASH_SUB_URL not set — placeholder kept in $_isu_file"
     fi
 }
-_inject_sub_url "$_OC_CFG_DIR/clash-all-noicon-clash.yaml"
 _inject_sub_url "$_NK_PROF_DIR/nikki-config.yaml"
+_inject_sub_url "$TARGET_DIR/package/base-files/files/usr/lib/wyhome/modules/36-homeproxy.sh"
 
-# ── 2. Pre-download Clash Meta (mihomo) core ─────────────────
-# Compatible build: broadest x86_64 support (no SSE4.2/AVX2 requirement).
-# Covers Intel 4th gen (4560T) and all modern AMD CPUs running in PVE KVM.
-# OpenClash UCI core_version=linux-amd64-v1 → expects binary named: clash_meta
+# ── 2. Pre-download Clash Meta core (vernesong/OpenClash) ─────
+# Download the OpenClash-packaged Meta core (compatible/v1 build) so the
+# binary is already in place when the firmware is flashed.
+# Source: vernesong/OpenClash releases — same Meta core the OpenClash team
+# tests and ships, ensuring version compatibility with OpenClash scripts.
+# UCI: core_type=Meta / core_version=linux-amd64-v1 → binary: clash_meta
 _CORE_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/core"
 mkdir -p "$_CORE_DIR"
 
-echo "[build-openclash] Fetching latest mihomo release tag..."
-_MIHOMO_VER=$(curl -fsSL \
+echo "[build-openclash] Fetching OpenClash Meta core URL from vernesong/OpenClash releases..."
+_OC_CORE_URL=$(curl -fsSL \
     -H "Accept: application/vnd.github.v3+json" \
     ${GITHUB_TOKEN:+-H "Authorization: token $GITHUB_TOKEN"} \
-    "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" \
-    | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+    "https://api.github.com/repos/vernesong/OpenClash/releases?per_page=30" \
+    | jq -r '[.[].assets[].browser_download_url
+              | select(test("clash_meta-linux-amd64-compatible\\.gz$"))]
+             | first // ""')
 
-_try_download_core() {
-    local url="$1" label="$2"
-    echo "[build-openclash] Trying $label: $url"
+if [ -n "$_OC_CORE_URL" ]; then
+    echo "[build-openclash] Downloading OpenClash Meta core: $_OC_CORE_URL"
     rm -f /tmp/clash_meta.gz /tmp/clash_meta
-    if curl -fsSL -o /tmp/clash_meta.gz "$url"; then
-        if gzip -d /tmp/clash_meta.gz && \
-           mv /tmp/clash_meta "$_CORE_DIR/clash_meta" && \
-           chmod +x "$_CORE_DIR/clash_meta"; then
-            echo "[build-openclash] Core $_MIHOMO_VER ($label) installed → $_CORE_DIR/clash_meta"
-            return 0
-        fi
+    if curl -fsSL -o /tmp/clash_meta.gz "$_OC_CORE_URL" && \
+       gzip -d /tmp/clash_meta.gz && \
+       mv /tmp/clash_meta "$_CORE_DIR/clash_meta" && \
+       chmod +x "$_CORE_DIR/clash_meta"; then
+        echo "[build-openclash] OpenClash Meta core installed → $_CORE_DIR/clash_meta"
+    else
+        rm -f /tmp/clash_meta.gz /tmp/clash_meta
+        echo "[build-openclash] WARNING: Core download/extraction failed — OpenClash will auto-download core at runtime"
     fi
-    rm -f /tmp/clash_meta.gz /tmp/clash_meta
-    echo "[build-openclash] WARNING: $label download failed"
-    return 1
-}
-
-if [ -n "$_MIHOMO_VER" ]; then
-    echo "[build-openclash] Latest mihomo: $_MIHOMO_VER"
-    _BASE="https://github.com/MetaCubeX/mihomo/releases/download/$_MIHOMO_VER"
-    _try_download_core \
-        "$_BASE/mihomo-linux-amd64-compatible-$_MIHOMO_VER.gz" \
-        "amd64-compatible (v1)" \
-    || _try_download_core \
-        "$_BASE/mihomo-linux-amd64-$_MIHOMO_VER.gz" \
-        "amd64-standard" \
-    || echo "[build-openclash] WARNING: All downloads failed — OpenClash will auto-download core at runtime"
 else
-    echo "[build-openclash] WARNING: Could not determine mihomo version — core will be downloaded at runtime"
+    echo "[build-openclash] WARNING: No matching asset found in vernesong/OpenClash releases"
+    echo "[build-openclash] OpenClash will auto-download the Meta core at first boot"
 fi
 
 # Clean up temp vars (sourced into parent scope)
 unset _OC_CFG_DIR _OC_PROV_DIR _YAML_SRC _CORE_DIR _NK_PROF_DIR _NK_YAML_SRC
-unset _MIHOMO_VER _BASE _isu_file _isu_esc
-unset -f _try_download_core _inject_sub_url 2>/dev/null || true
-
+unset _OC_CORE_URL _isu_file _isu_esc
+unset -f _inject_sub_url 2>/dev/null || true

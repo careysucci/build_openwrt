@@ -12,6 +12,7 @@
 - [性能优化架构](#性能优化架构)
 - [OpenClash UCI 预配置说明](#openclash-uci-预配置说明)
 - [Nikki 备用方案](#nikki-备用方案)
+- [HomeProxy 备用方案](#homeproxy-备用方案)
 - [问题排查与修复记录](#问题排查与修复记录)
 - [IPv6 泄漏防护](#ipv6-泄漏防护)
 - [模块化架构说明](#模块化架构说明)
@@ -460,6 +461,52 @@ uci commit nikki
 
 ---
 
+## HomeProxy 备用方案
+
+文件：`diy/modules/36-homeproxy.sh`
+
+HomeProxy（luci-app-homeproxy）是基于 **sing-box** 内核的 LuCI 前端，作为 OpenClash / Nikki 之外的第三种备用方案。打包阶段由 `36-homeproxy.sh` 自动写入 `/etc/config/homeproxy`，LuCI 界面读取的就是这份 UCI，因此**界面与配置文件天然一致**。
+
+### 与 clash.yaml 的对应关系
+
+| 需求 | clash.yaml 做法 | homeproxy 做法（本模块） |
+|------|----------------|--------------------------|
+| 国内直连保速 | China/IP + China/Domain → DIRECT | `routing_mode='bypass_mainland_china'`（国内 IP/域名直连，不进 sing-box 用户态） |
+| 国外走代理（含 YouTube） | GeoLocation-!CN / MATCH → 代理 | 默认出站 = 代理 |
+| 国内 DNS | nameserver-policy geosite:cn → 172.16.3.7 | `china_dns_server='172.16.3.7'` |
+| 国外 DNS（广告过滤） | nameserver → 172.16.3.6 | `dns_server='172.16.3.6'` |
+| 无 DNS 泄漏 | 仅内网 AGH，dnsmasq_noresolv | 仅内网 AGH（.6/.7），不使用任何 ISP/公网 DNS |
+| 无 IP 泄漏 | MATCH,国外 兜底 | 默认路由 = 代理；`sniff_override=1` 防 IP-only 漏判 |
+| IPv6 | ipv6: true | `ipv6_support='1'` |
+| 订阅 | proxy-providers cc-auto | `subscription` 段，复用同一 `CLASH_SUB_URL`（构建时注入） |
+
+> 说明：homeproxy 按**目的地址**分流——`.6` 自身查询国外上游（DoH 1.1.1.1）时目的为国外地址，会被自动判定走代理；`.7` 查询国内上游目的为国内地址，自动直连。无需像 clash 那样手写 SRC-IP 规则。
+
+### 默认禁用（安全）
+
+与 Nikki 一致，homeproxy **默认禁用**（`main_node='nil'` + 服务 disable）。同一时间只能有一个透明代理占用 tproxy，OpenClash 仍是主力，**启用 homeproxy 不会自动发生，绝不影响当前网络与网速**。
+
+### 切换方式
+
+```bash
+# 切换到 HomeProxy
+/etc/init.d/openclash stop
+/etc/init.d/nikki stop 2>/dev/null
+# LuCI → HomeProxy → 节点：更新订阅 → 选择一个节点作为「主节点」
+/etc/init.d/homeproxy enable
+/etc/init.d/homeproxy start
+
+# 切换回 OpenClash
+/etc/init.d/homeproxy stop
+/etc/init.d/homeproxy disable
+/etc/init.d/openclash start
+```
+
+> ⚠️ OpenClash / Nikki / HomeProxy 三者互斥，任意时刻只启用一个。
+> ⚠️ 启用后请用 `nslookup youtube.com` 与泄漏检测站点确认：DNS 只命中内网 .6/.7，出口仅显示代理节点 IP。
+
+---
+
 ## 问题排查与修复记录
 
 ### 问题一：所有国外网站 timeout
@@ -674,7 +721,8 @@ diy/
 │   ├── 10-system.sh           # 系统基础设置（hostname, timezone, feeds...）
 │   ├── 20-firewall.sh         # 防火墙默认值
 │   ├── 30-openclash.sh        # OpenClash UCI 预配置
-│   ├── 35-nikki.sh            # Nikki UCI 预配置
+│   ├── 35-nikki.sh            # Nikki UCI 预配置（备用，默认禁用）
+│   ├── 36-homeproxy.sh        # HomeProxy UCI 预配置（备用，默认禁用）
 │   └── 40-cleanup.sh          # 服务清理（禁用无用服务）
 ├── scripts/                    # 构建时脚本（不进镜像）
 │   └── build-openclash.sh     # 下载 clash_meta 核心 + 安装配置

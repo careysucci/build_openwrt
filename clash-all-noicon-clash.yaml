@@ -3,24 +3,21 @@
 # ========================
 
 # 机场节点订阅
-
+# url 占位符 __CLASH_SUB_URL__ 由 build-openclash.sh 在构建时注入（若设置了
+# CLASH_SUB_URL 环境变量），或刷机后在 OpenClash → 订阅设置 里填写。
 proxy-providers:
   cc-auto:
-    # 在线订阅 + 本地缓存：开箱即用，自动定期更新。
-    #   url:  机场订阅地址。构建时由 build-openclash.sh 用环境变量 CLASH_SUB_URL 注入；
-    #         也可刷机后在 OpenClash 界面/本文件里直接填写。
-    #   path: 本地缓存文件。mihomo 启动时先读取该缓存（节点立即可用），再后台按
-    #         interval 自动更新。首次若订阅地址需代理才能下载（订阅鸡蛋问题），
-    #         只需手动下载一次到该 path 完成 bootstrap，之后全自动、无需再手动介入。
     type: http
-    url: "__CLASH_SUB_URL__"
+    # 出厂占位 URL（合法格式但本地不可达）：确保 mihomo 能解析该 provider 配置。
+    # mihomo 启动时若 path 缓存文件已存在且未过期，直接读缓存，不请求此 URL。
+    # 用户通过 OpenClash UI → 订阅设置 填入真实订阅地址后，会覆盖此值。
+    url: "http://127.0.0.1:11111/subscription"
     path: "/etc/openclash/config/providers/cc-auto.yaml"
-    interval: 86400                  # 每 24 小时自动更新订阅
+    interval: 86400
     health-check:
       enable: true
       url: https://www.gstatic.com/generate_204
-      interval: 300                # 5分钟检测一次，及时剔除慢节点
-
+      interval: 300
 
 proxies:
   - { name: 直连, type: direct }
