@@ -579,57 +579,141 @@ proxy-server-nameserver:
 
 ---
 
-### 问题四：订阅鸡蛋问题
+### 问题四：首次启动 / 订阅节点为 0 / 已刷 img 初始化
 
-**症状：** 订阅 URL 是境外地址，需要代理下载；但无节点无法代理 → 循环。
-首次启动节点数为 0、无法访问国外网站。
+---
 
-**设计目标：** 开箱填一次订阅地址即用；自动定期更新；最多首次手动 bootstrap 一次，之后永不手动介入。
+#### 4.1 设计说明：OpenClash 出厂默认禁用
 
-**provider 正确写法（本仓库已默认配置）：** `type: http` 提供 `url` 自动定期更新，同时用
-`path` 做本地缓存——mihomo 启动时先读缓存（节点立即可用），再后台按 `interval` 自动更新：
+**为什么禁用？**
+
+OpenClash 启动后立即开启 tproxy。若此时 `proxy-providers` 尚无节点（空缓存），
+所有外网流量（包括 `.6` AdGuardHome 的 DNS 上游查询）都会进入 Clash 规则引擎，
+找不到可用节点 → **timeout → 断网**。
+
+因此出厂固件将 OpenClash 默认设为 **禁用（disabled）**，
+让用户在有网络的环境下完成订阅配置，再手动启用，避免循环依赖。
+
+---
+
+#### 4.2 proxy-providers URL 占位符设计
+
+`clash-all-noicon-clash.yaml` 中使用的出厂占位 URL：
 
 ```yaml
 proxy-providers:
   cc-auto:
     type: http
-    url: "你的机场订阅地址"           # 构建时由 CLASH_SUB_URL 注入，或刷机后在界面/YAML 填写
-    path: "/etc/openclash/config/providers/cc-auto.yaml"   # 本地缓存
-    interval: 86400                  # 每 24 小时自动更新
+    url: "http://127.0.0.1:11111/subscription"   # 出厂占位，合法格式但本地不可达
+    path: "/etc/openclash/config/providers/cc-auto.yaml"
+    interval: 86400
     health-check:
       enable: true
       url: https://www.gstatic.com/generate_204
       interval: 300
 ```
 
-**开箱即用：填一次订阅地址**
+**为什么必须是合法 URL？**
 
-- 方式 A（推荐，构建时注入）：在 GitHub 仓库 Settings → Secrets and variables → Actions
-  新增变量/密钥 `CLASH_SUB_URL`，值为订阅地址。`build-openclash.sh` 会把 YAML 里的占位符
-  `__CLASH_SUB_URL__` 替换为该地址，刷机即用。
-- 方式 B（刷机后）：在 OpenClash 界面或编辑
-  `/etc/openclash/config/clash-all-noicon-clash.yaml`，把 `url` 改成订阅地址。
+mihomo（Meta 内核）在解析 YAML 时会校验 `proxy-providers` 的 `url` 字段格式。
+若 URL 格式无效（如 `__CLASH_SUB_URL__`、空字符串），
+**provider 整体初始化失败**，即使 `path` 缓存文件已手动放好，节点依然为 0。
 
-**首次 bootstrap（仅当订阅地址需代理才能下载时，做一次）：**
+`http://127.0.0.1:11111/subscription` 格式合法，连接会立即被拒绝（无人监听），
+mihomo 此时回退读取 `path` 缓存文件，节点正常加载。
+
+**当真实订阅 URL 已填入后（替换占位符）：**
+mihomo 从真实 URL 拉取订阅，更新 `path` 缓存，按 `interval: 86400` 每天自动续期。
+
+---
+
+#### 4.3 首次启动标准流程（全新刷机）
+
+```
+1. 刷机 → 开机
+   OpenClash 出厂禁用，无 tproxy → dnsmasq 用 ISP DNS → 网络完全正常
+
+2. SSH 登录，停止 OpenClash（确保无 tproxy 干扰）
+   /etc/init.d/openclash stop
+
+3. 下载订阅文件到 path 指定路径
+   mkdir -p /etc/openclash/config/providers
+   curl -L -o /etc/openclash/config/providers/cc-auto.yaml "你的机场订阅地址"
+
+   # 验证是 Clash YAML 格式，节点数 > 0
+   head -3 /etc/openclash/config/providers/cc-auto.yaml
+   grep -c '  - name:' /etc/openclash/config/providers/cc-auto.yaml
+
+4. 在 OpenClash UI 或直接编辑 YAML，把 url 改为真实订阅地址
+   /etc/openclash/config/clash-all-noicon-clash.yaml
+     url: "https://你的机场订阅地址"    ← 替换占位符
+
+5. 启用并启动 OpenClash
+   /etc/init.d/openclash enable
+   /etc/init.d/openclash start
+
+结果：mihomo 读取 path 缓存 → 节点立即可用 → 按 interval 每天自动更新
+```
+
+**一条命令完成步骤 2–5（替换 YOUR_SUB_URL）：**
+
 ```bash
-# 停止 OpenClash（绕开 tproxy）
-/etc/init.d/openclash stop
-
-# 手动下载订阅到 path 指定的缓存文件（仅这一次）
-mkdir -p /etc/openclash/config/providers
-curl -L -o /etc/openclash/config/providers/cc-auto.yaml "你的机场订阅地址"
-
-# 确认是 clash 格式且含 proxies 列表
-grep -c '^\s*-\s' /etc/openclash/config/providers/cc-auto.yaml   # 节点条目数应 > 0
-
-# 重启：mihomo 先用缓存出网，之后按 interval 全自动更新，无需再手动介入
+/etc/init.d/openclash stop && \
+mkdir -p /etc/openclash/config/providers && \
+curl -L -o /etc/openclash/config/providers/cc-auto.yaml "YOUR_SUB_URL" && \
+grep -c '  - name:' /etc/openclash/config/providers/cc-auto.yaml && \
+sed -i 's|url: "http://127.0.0.1:11111/subscription"|url: "YOUR_SUB_URL"|' \
+    /etc/openclash/config/clash-all-noicon-clash.yaml && \
+/etc/init.d/openclash enable && \
 /etc/init.d/openclash start
 ```
 
-> bootstrap 后节点已可用，mihomo 会按 `interval: 86400` 每 24 小时自动从 `url` 更新订阅；
-> 失败时保留旧缓存，不会清空节点。若订阅地址在国内可直达，则连 bootstrap 都不需要，开箱即用。
+---
 
-**运行中强制刷新订阅：**
+#### 4.4 修复旧版已刷 img（URL 为无效占位符 `__CLASH_SUB_URL__`）
+
+旧版固件的 YAML 使用了格式非法的占位符 `url: "__CLASH_SUB_URL__"`，
+导致 provider 无法初始化，**手动放好订阅文件后节点仍为 0**。
+
+**排查命令（判断是否受影响）：**
+
+```bash
+grep 'url:' /etc/openclash/config/clash-all-noicon-clash.yaml | head -3
+# 若输出包含 __CLASH_SUB_URL__  → 需要执行下方修复
+# 若输出为 http:// 或 https:// 开头 → 不受影响
+```
+
+**修复步骤：**
+
+```bash
+# 1. 停止 OpenClash
+/etc/init.d/openclash stop
+
+# 2. 修复无效占位符（改为合法的本地失败 URL）
+sed -i 's|url: "__CLASH_SUB_URL__"|url: "http://127.0.0.1:11111/subscription"|' \
+    /etc/openclash/config/clash-all-noicon-clash.yaml
+
+# 3. 下载订阅（此时无 tproxy，可直连）
+mkdir -p /etc/openclash/config/providers
+curl -L -o /etc/openclash/config/providers/cc-auto.yaml "YOUR_SUB_URL"
+grep -c '  - name:' /etc/openclash/config/providers/cc-auto.yaml   # 应 > 0
+
+# 4. （推荐）把 url 改为真实地址，以后每天自动更新
+sed -i 's|url: "http://127.0.0.1:11111/subscription"|url: "YOUR_SUB_URL"|' \
+    /etc/openclash/config/clash-all-noicon-clash.yaml
+
+# 5. 启用并启动
+/etc/init.d/openclash enable
+/etc/init.d/openclash start
+```
+
+> 新版固件（出厂 URL 已是 `http://127.0.0.1:11111/subscription`）跳过步骤 2，
+> 直接从步骤 3 开始即可。
+
+---
+
+#### 4.5 运行中强制刷新订阅
+
 ```bash
 curl -X PUT "http://127.0.0.1:9090/providers/proxies/cc-auto" \
   -H "Authorization: Bearer oc_6Qf9v2LmP8xT4rN1kY7sDz3aH5uWc"
