@@ -7,11 +7,17 @@
 # 机场节点订阅
 proxy-providers:
   cc-auto:
-    # 在线订阅 + 本地缓存（同 OpenClash）：开箱即用，自动定期更新。
-    # url 由 build-openclash.sh 用环境变量 CLASH_SUB_URL 注入；path 为本地缓存，
-    # 支持首次手动 bootstrap 一次，之后按 interval 全自动更新。
+    # 出厂占位 URL（本地不可达）：
+    #   mihomo 启动时若 path 缓存文件已存在，直接读缓存，不请求此 URL。
+    #
+    # 首次配置（SSH 到路由器运行）：
+    #   /root/setup-nikki.sh 'https://你的订阅链接'
+    #   脚本会：① 停止 OpenClash ② 下载节点写入缓存
+    #           ③ 把真实 URL 写入本字段 ④ 启动 Nikki
+    #
+    # URL 写入后，mihomo 每 interval 秒自动拉取最新节点（无需 Nikki UI 订阅管理）。
     type: http
-    url: "__CLASH_SUB_URL__"
+    url: "http://127.0.0.1:11111/subscription"
     path: "/etc/nikki/run/providers/cc-auto.yaml"
     interval: 86400
     health-check:

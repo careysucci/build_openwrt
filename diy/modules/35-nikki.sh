@@ -51,7 +51,10 @@ uci set nikki.api.port='9091'
 uci set nikki.api.secret='nk_7Xm2pQ9wR4tK8vL1nJ6cF3bA5yD0e'
 
 # --- Disable auto-start (user switches between OpenClash and Nikki manually) ---
-# Only one can run at a time (both use same ports + tproxy)
+# Only one can run at a time (both use same ports + tproxy).
+# First-time Nikki setup:
+#   /root/setup-nikki.sh 'https://your-airport.com/subscribe?token=xxx'
+#   (stops OpenClash, downloads nodes, updates YAML URL, starts Nikki)
 uci set nikki.config.enabled='0'
 
 uci commit nikki

@@ -136,14 +136,32 @@ echo "[30-openclash] UCI pre-configured to match clash-all-noicon-clash.yaml"
 echo "[30-openclash] OpenClash disabled by default — enable after adding subscription URL"
 
 # ── Subscription (OpenClash native management) ────────────────
-# OpenClash downloads subscriptions itself before starting the core — no proxy
-# needed and no chicken-and-egg problem.  The URL is left blank here; fill it
-# in after flashing via:  OpenClash UI → 订阅设置  or:
-#   uci set openclash.@subscribe[0].url='YOUR_URL' && uci commit openclash
-#   /etc/init.d/openclash restart
+# DESIGN: This build uses mihomo proxy-providers (YAML: proxy-providers.cc-auto)
+# for node management. The proxy-provider cache file is at:
+#   /etc/openclash/config/providers/cc-auto.yaml
 #
-# OpenClash injects the downloaded nodes into the config's proxies: list.
-# All proxy-groups use include-all: true so they pick up the nodes automatically.
+# CRITICAL: The placeholder subscription entry is set to enabled='0'.
+# If enabled='1' with an empty URL, OpenClash's startup script tries to
+# process the subscription and may write an empty/error state that overwrites
+# the manually placed provider cache file, resulting in "no nodes" after restart.
+#
+# First-time node setup (two options):
+#
+# Option A — Use the pre-installed bootstrap helper (recommended):
+#   /usr/lib/wyhome/oc-bootstrap.sh 'https://your-airport.com/subscribe?token=xxx'
+#   uci set openclash.config.enable=1 && uci commit openclash
+#   /etc/init.d/openclash enable && /etc/init.d/openclash start
+#
+# Option B — Manual: place a Clash-format YAML (with 'proxies:' list) at:
+#   /etc/openclash/config/providers/cc-auto.yaml
+#   then: uci set openclash.config.enable=1 && uci commit openclash
+#         /etc/init.d/openclash enable && /etc/init.d/openclash start
+#
+# Option C — OpenClash subscription management (UI-driven):
+#   OpenClash UI → 订阅设置 → add URL → save
+#   uci set openclash.@subscribe[0].enabled=1 && uci commit openclash
+#   /etc/init.d/openclash restart
+#   (OpenClash injects nodes into proxies: list; include-all:true picks them up)
 _oc_sub_idx=0
 while uci -q get "openclash.@subscribe[$_oc_sub_idx]" > /dev/null 2>&1; do
     uci delete "openclash.@subscribe[$_oc_sub_idx]"
@@ -152,9 +170,11 @@ uci add openclash subscribe
 uci set openclash.@subscribe[-1].name='机场订阅'
 uci set openclash.@subscribe[-1].url=''
 uci set openclash.@subscribe[-1].type='0'
-uci set openclash.@subscribe[-1].enabled='1'
-uci set openclash.@subscribe[-1].auto_update='1'
+# MUST remain disabled (0) while URL is empty — an enabled entry with empty URL
+# causes OpenClash startup to overwrite the proxy-provider cache with empty data.
+uci set openclash.@subscribe[-1].enabled='0'
+uci set openclash.@subscribe[-1].auto_update='0'
 uci set openclash.@subscribe[-1].auto_update_time='2'
 uci commit openclash
-echo "[30-openclash] Subscription placeholder created (fill URL via OpenClash UI)"
+echo "[30-openclash] Subscription placeholder created (DISABLED — fill URL then set enabled=1)"
 

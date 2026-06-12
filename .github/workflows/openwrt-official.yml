@@ -144,6 +144,10 @@ jobs:
           rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
 
       - name: Load custom configuration
+        env:
+          # Expose token for authenticated GitHub API calls in build-openclash.sh
+          # (unauthenticated calls are rate-limited to 60/hr and often fail on busy runners)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           [ -e files ] && mv files ${{ env.TARGET_MATRIX }}/files
           [ -e .config ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
