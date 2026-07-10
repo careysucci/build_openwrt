@@ -14,12 +14,56 @@ _cpu_count() {
 }
 
 _all_mask_hex() {
-    local n
+    local n chunk suffix=""
     n=$(_cpu_count)
-    printf "%x" "$(( (1 << n) - 1 ))"
+    # smp_affinity uses comma-separated 32-bit hexadecimal groups. Avoid
+    # shell bit shifts wider than 31 bits, which overflow on BusyBox ash.
+    while [ "$n" -gt 32 ]; do
+        suffix="${suffix:+$suffix,}ffffffff"
+        n=$((n - 32))
+    done
+    if [ "$n" -eq 32 ]; then
+        chunk="ffffffff"
+    else
+        chunk=$(printf "%x" "$(( (1 << n) - 1 ))")
+    fi
+    printf "%s%s" "$chunk" "${suffix:+,$suffix}"
 }
 
-# ---- CPU Governor -----------------------------------------------------------
+# Print the smp_affinity mask for one zero-based CPU index. Linux expects the
+# least-significant 32 CPU bits at the right of a comma-separated mask.
+_cpu_mask_hex() {
+    local cpu group bit mask
+    cpu="$1"
+    group=$((cpu / 32))
+    bit=$((cpu % 32))
+    mask=$(printf "%x" "$((1 << bit))")
+    while [ "$group" -gt 0 ]; do
+        mask="${mask},00000000"
+        group=$((group - 1))
+    done
+    printf "%s" "$mask"
+}
+
+# Detect VM/hypervisor environment.
+# Returns 0 (true) if running inside a VM, 1 (false) on physical hardware.
+# Used to choose between irqbalance (physical) and manual IRQ affinity (VM).
+_is_vm() {
+    # CPUID hypervisor flag — set by KVM, QEMU, VMware, Hyper-V, Xen
+    grep -qw "hypervisor" /proc/cpuinfo 2>/dev/null && return 0
+    # Xen guests may not expose the CPUID hypervisor flag or DMI data.
+    [ -d /proc/xen ] && return 0
+    # DMI sys_vendor fallback (covers cases where CPUID bit is hidden)
+    local _sv
+    _sv=$(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null \
+          | tr '[:upper:]' '[:lower:]')
+    case "$_sv" in
+        *qemu*|*kvm*|*vmware*|*virtualbox*|*xen*|*microsoft*) return 0 ;;
+    esac
+    return 1
+}
+
+# ---- Per-interface functions ------------------------------------------------
 
 # Set CPU frequency governor to performance for consistent throughput.
 # In PVE KVM, default governor is ondemand which throttles to base clock under
@@ -60,7 +104,7 @@ bind_msix_irqs() {
     local iface="$1"
     local msi_dir="/sys/class/net/$iface/device/msi_irqs"
     local irq_file="/sys/class/net/$iface/device/irq"
-    local n i cpu_index m mhex irq total
+    local n i cpu_index mhex irq total
     n=$(_cpu_count)
     i=0
 
@@ -68,8 +112,7 @@ bind_msix_irqs() {
         total=0
         for irq in $(ls "$msi_dir" 2>/dev/null | sort -n); do
             cpu_index=$(( i % n ))
-            m=$(( 1 << cpu_index ))
-            mhex=$(printf "%x" "$m")
+            mhex=$(_cpu_mask_hex "$cpu_index")
             echo "$mhex" > "/proc/irq/$irq/smp_affinity" 2>/dev/null || true
             i=$(( i + 1 ))
             total=$(( total + 1 ))
@@ -236,16 +279,17 @@ apply_tcp_tuning() {
 
     # --- Connection tracking tuning ---
     # 3×2G WAN aggregate with 2.5w+ concurrent connections per service.
-    # max=524288 entries, buckets=65536 (ratio 1:8 for fast lookups)
+    # max=524288 entries, buckets=131072 (ratio 1:4 — keeps hash chain length ≤4,
+    # preventing O(n) conntrack lookup degradation under high connection rates)
     echo "524288" > /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || true
-    echo "65536" > /proc/sys/net/netfilter/nf_conntrack_buckets 2>/dev/null || \
-        echo "65536" > /sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || true
+    echo "131072" > /proc/sys/net/netfilter/nf_conntrack_buckets 2>/dev/null || \
+        echo "131072" > /sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || true
     # Reduce established timeout: default 432000s (5 days) wastes entries.
     # 7200s (2 hours) is enough for any legitimate long-lived connection.
     echo "7200" > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established 2>/dev/null || true
     # Reduce TIME_WAIT timeout for faster entry recycling
     echo "60" > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait 2>/dev/null || true
-    echo "[netopt] conntrack: max=524288, buckets=65536, established_timeout=7200s"
+    echo "[netopt] conntrack: max=524288, buckets=131072, established_timeout=7200s"
 
     # --- Kernel network stack backlog & NAPI budget ---
     # 5Gbps with mixed packet sizes: ~400k-4M pps depending on payload.
@@ -307,7 +351,7 @@ apply_tcp_tuning() {
 # ---- Main entrypoints -------------------------------------------------------
 
 start() {
-    local n ifaces iface
+    local n ifaces iface _VM_ENV
     n=$(_cpu_count)
     echo "[netopt] starting — ${n} CPU(s) detected, mask=0x$(_all_mask_hex)"
     echo "[netopt] target: 5Gbps NIC + 3×2G WAN aggregate"
@@ -318,11 +362,37 @@ start() {
     # 2. TCP/IP stack tuning (BBR + buffers + conntrack + multi-WAN)
     apply_tcp_tuning
 
-    # 3. irqbalance (coexists with manual affinity; handles dynamic devices)
-    if command -v irqbalance >/dev/null 2>&1; then
+    # 3. IRQ balancing strategy — VM vs physical
+    # Problem: irqbalance is a daemon that re-distributes IRQ affinity every
+    # ~10 seconds. If we start irqbalance AND then set smp_affinity manually
+    # (bind_msix_irqs), irqbalance will silently override our settings.
+    #
+    # Physical host: irqbalance understands real NUMA/cache topology and does
+    #   a better job than static round-robin. Let it handle IRQs; skip manual
+    #   bind_msix_irqs so the two don't fight each other.
+    #
+    # VM (PVE/KVM/VMware/…): all vCPUs are topologically equal — irqbalance
+    #   has no meaningful topology info and often consolidates all virtio queue
+    #   IRQs onto 1-2 vCPUs, creating a bottleneck. Manual round-robin across
+    #   all vCPUs (bind_msix_irqs, step 4) is more predictable and persistent.
+    _VM_ENV=0
+    if _is_vm; then
+        _VM_ENV=1
+        # irqbalance may already have been started earlier in the boot order.
+        # It continuously rewrites smp_affinity, so it must be stopped as well
+        # as disabled before the manual settings below are applied.
+        if [ -x /etc/init.d/irqbalance ]; then
+            /etc/init.d/irqbalance stop 2>/dev/null || true
+            /etc/init.d/irqbalance disable 2>/dev/null || true
+        fi
+        echo "[netopt] VM/hypervisor detected — irqbalance stopped; manual IRQ affinity will be applied"
+    elif [ -x /etc/init.d/irqbalance ]; then
         /etc/init.d/irqbalance enable  2>/dev/null || true
-        /etc/init.d/irqbalance restart 2>/dev/null || true
-        echo "[netopt] irqbalance enabled"
+        # Do not restart a running daemon at S99: its restart needlessly
+        # reshuffles active IRQs. Start it only when it is not already running.
+        /etc/init.d/irqbalance status >/dev/null 2>&1 || \
+            /etc/init.d/irqbalance start 2>/dev/null || true
+        echo "[netopt] physical host — irqbalance enabled (manual IRQ affinity skipped)"
     fi
 
     # 4. Per-interface optimization (physical NICs)
@@ -338,7 +408,10 @@ start() {
             apply_interrupt_coalescing "$iface"
             set_txqueuelen           "$iface"
             apply_rps_xps            "$iface"
-            bind_msix_irqs           "$iface"
+            # Manual IRQ affinity: VM only.
+            # On physical host irqbalance (step 3) handles distribution;
+            # calling bind_msix_irqs here would conflict with it.
+            [ "$_VM_ENV" -eq 1 ] && bind_msix_irqs "$iface"
         done
     fi
 
@@ -353,6 +426,26 @@ start() {
         apply_rps_xps  "$iface"   # only touches rx/tx queues (safe on virtual netdev)
         set_txqueuelen "$iface"
     done
+
+    # 6. Install persistent initcwnd hotplug script
+    # apply_tcp_tuning() runs `ip route change ... initcwnd 128` above, but that
+    # only patches the route object that exists at boot time.  A PPPoE reconnect
+    # or DHCP renew replaces the route object entirely, silently resetting
+    # initcwnd back to the kernel default (10).  This hotplug fires on every
+    # interface "ifup" event and re-stamps the current default route(s).
+    mkdir -p /etc/hotplug.d/iface
+    cat > /etc/hotplug.d/iface/99-initcwnd << 'HOTPLUG_EOF'
+#!/bin/sh
+# Installed by netopt: re-apply initcwnd=128 / initrwnd=128 after every WAN
+# reconnect (PPPoE, DHCP renew, etc.) so TCP slow-start always uses the large
+# initial window regardless of how many times the WAN interface has cycled.
+[ "$ACTION" = "ifup" ] || exit 0
+ip route show default | while IFS= read -r _r; do
+    ip route change $_r initcwnd 128 initrwnd 128 2>/dev/null || true
+done
+HOTPLUG_EOF
+    chmod +x /etc/hotplug.d/iface/99-initcwnd
+    echo "[netopt] hotplug/99-initcwnd installed (initcwnd=128 persists across WAN reconnects)"
 
     echo "[netopt] completed"
 }
