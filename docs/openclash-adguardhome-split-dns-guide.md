@@ -172,38 +172,35 @@ Clash 拿到代理IP → 建立 TCP 连接 → 正常工作 ✓
 | `default_qdisc` | **fq** | BBR 精确 pacing 必需 |
 | `tcp_rmem / tcp_wmem max` | **64MB** | BDP=5Gbps×30ms=18.75MB，留足余量 |
 | `tcp_slow_start_after_idle` | **0** | 空闲连接恢复不重新慢启动 |
-| `initcwnd / initrwnd` | **128**（所有默认路由）| 首包即 192KB，多 WAN 全部生效 |
-| `netdev_max_backlog` | **50000** | 5Gbps 突发不丢包 |
-| `netdev_budget` | **1200** | NAPI 单次 poll 处理更多包 |
+| `initcwnd / initrwnd` | **内核默认** | 避免过大初始突发触发丢包和拥塞窗口回退 |
+| `netdev_max_backlog` | **5000** | 吸收合理突发且避免 bufferbloat |
+| `netdev_budget / budget_usecs` | **300 / 2000** | 避免长时间 softirq 阻塞 virtio TX completion |
 | `nf_conntrack_max` | **524288** | 多 WAN × 大量连接 |
 | `nf_conntrack_tcp_timeout_established` | **7200s** | 快速释放过期连接（默认 5 天） |
 | `ip_local_port_range` | **1024-65535** | 多 WAN 出站端口 28k→64k |
 | `tcp_tw_reuse` / `tcp_fin_timeout` | **1 / 15s** | TIME_WAIT 快速回收 |
 | `rp_filter` | **0** | 多 WAN 非对称路由兼容 |
 | `bridge-nf-call-*` | **0** | bridge 帧不过 nftables，减少开销 |
-| `rps_sock_flow_entries` | **65536** | per-flow CPU 亲和，减少 cache miss |
+| `rps_sock_flow_entries` | **0** | 使用 virtio/RSS 原生队列亲和，避免二次跨核 |
 
 #### 每张物理网卡调优
 
 | 优化项 | 说明 |
 |--------|------|
 | CPU governor → performance | 禁止降频，保持峰值主频 |
-| multiqueue 激活 (`ethtool -L`) | 多队列分散到多核（**依赖 PVE VM 配置多队列**，见下） |
-| Ring buffer 最大化 (`ethtool -G`) | 吸收调度抖动，避免丢包 |
+| multiqueue | 保留驱动/PVE 配置，不在运行时重建队列 |
+| Ring buffer 最大化 (`ethtool -G`) | 仅物理网卡使用；virtio 保留驱动默认值 |
 | 硬件卸载 GRO/GSO/TSO/csum/sg | 批处理 64KB super-packet，降低每包 CPU 开销 |
 | **LRO = off** | LRO 聚合的 super-frame 无法被转发拆分，与路由/tproxy 冲突 |
-| 中断合并 (`ethtool -C` adaptive) | 5Gbps 减少 ~400k 中断/秒 |
-| txqueuelen = 5000 | 5Gbps TX 队列不溢出 |
-| MSI-X IRQ 多核绑定 | 每队列 IRQ 轮询到不同 CPU，避免全堆 CPU0 |
+| 中断合并 (`ethtool -C` adaptive) | 仅支持 adaptive 的物理网卡使用，virtio 跳过 |
+| txqueuelen = 1000 | 保持正常队列长度，避免持续排队延迟 |
+| IRQ 管理 | 统一交给 irqbalance，不与手动 affinity 混用 |
 
-### 软件流量卸载（Flow Offload）— 打破国内直连瓶颈的关键
+### 软件快速转发—打破国内直连瓶颈的关键
 
 文件：`diy/modules/20-firewall.sh`
 
-```bash
-firewall.@defaults[0].flow_offloading=1      # 软件卸载：开启
-firewall.@defaults[0].flow_offloading_hw=0   # 硬件卸载：关闭（破坏 tproxy）
-```
+LEDE 使用 TurboACC SFE，Official 使用 nft software flow offload；两条路径互斥，硬件 offload 始终关闭。
 
 **为什么软件卸载能与 OpenClash 共存？**（数据通路分析）
 
@@ -314,14 +311,14 @@ mpstat -P ALL 1     # 或 top 按 1 展开各核
    且解封装后的处理倾向于串行到单核 → 单核打满即为吞吐天花板。
 ```
 
-### 本工程的两层 PPPoE 加速（已落地）
+### 本工程的 PPPoE 加速
 
 | 层级 | 机制 | 文件 |
 |------|------|------|
-| **1. 软件流量卸载** | `flow_offloading=1`：已建立的连接走 flowtable 快速通路，跳过逐包 PPPoE 解封装。新内核 flowtable 原生支持 PPPoE 设备 | `20-firewall.sh` |
-| **2. PPPoE 接口 RPS** | netopt 对 `pppoe-wan`/`ppp*` 接口施加 RPS + 增大 txqueuelen，把解封装后的软中断分散到 8 核（之前被显式跳过，现已修复） | `netopt.sh` |
+| **1. 软件快速转发** | LEDE 使用 SFE；Official 使用 nft flowtable；二者不会同时启用 | `20-firewall.sh` |
+| **2. 原生多队列亲和** | 保留 virtio/RSS 队列映射并由 irqbalance 管理 IRQ；不再强制全核 RPS，避免跨核、乱序和 cache 抖动 | `netopt.sh` |
 
-> 配合物理 virtio 网卡的 8 队列 + RPS，不同 TCP 流落到不同 CPU，PPPoE 处理从"单核串行"变为"8 核并行"。
+> PVE 中应在 VM 配置层启用 virtio 多队列，并让 guest 的 irqbalance 管理队列 IRQ。
 
 ### 验证 PPPoE 加速是否生效
 
@@ -331,7 +328,7 @@ nft list ruleset | grep -A3 flowtable
 # 期望输出含: devices = { eth0, pppoe-wan, ... }
 # 若 devices 里没有 pppoe-wan → flow offload 未覆盖 WAN，需检查防火墙 WAN 区域
 
-# 2. 确认 pppoe-wan 已应用 RPS（应为非 0 的 CPU 掩码，如 ff = 8核）
+# 2. 确认未强制全核 RPS（多队列环境应为 0）
 cat /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus
 
 # 3. 测速时观察是否单核打满（PPPoE 瓶颈的典型特征）
@@ -365,9 +362,9 @@ uname -r
 ```
 修复前: PPPoE 单核串行 + CUBIC 慢启动 → 400M（个位数慢慢涨）
 修复后:
-  ├─ BBR + 64MB buffer + initcwnd=128 → 消除慢启动，秒达峰值
-  ├─ flow_offloading=1 → 跳过逐包 PPPoE 解封装
-  └─ pppoe-wan RPS + 物理网卡 8 队列 → 解封装分散到 8 核
+  ├─ BBR + fq + 自动窗口 → 平稳建立拥塞窗口
+  ├─ SFE 或 nft flowtable → 已建立连接走快速路径
+  └─ virtio/RSS 多队列 + irqbalance → 保持队列和 CPU 亲和
   = 单条 PPPoE 跑满 2Gbps，3 条聚合接近 NIC 上限
 ```
 

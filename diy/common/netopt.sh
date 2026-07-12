@@ -2,7 +2,7 @@
 # Network performance optimization for OpenWrt on PVE/x86
 # Target: 5Gbps NIC + 3×2Gbps WAN aggregation (≈6Gbps aggregate)
 # Compatible with: OpenWrt Official (firewall4/nftables) and LEDE/Lean's OpenWrt
-# Provides: CPU governor, TCP BBR, buffer tuning, NIC offloads, IRQ/RPS/XPS, multiqueue
+# Provides: CPU governor, TCP BBR, conservative buffers, NIC offloads and irqbalance
 
 START=99
 STOP=10
@@ -11,56 +11,6 @@ STOP=10
 
 _cpu_count() {
     nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 1
-}
-
-_all_mask_hex() {
-    local n chunk suffix=""
-    n=$(_cpu_count)
-    # smp_affinity uses comma-separated 32-bit hexadecimal groups. Avoid
-    # shell bit shifts wider than 31 bits, which overflow on BusyBox ash.
-    while [ "$n" -gt 32 ]; do
-        suffix="${suffix:+$suffix,}ffffffff"
-        n=$((n - 32))
-    done
-    if [ "$n" -eq 32 ]; then
-        chunk="ffffffff"
-    else
-        chunk=$(printf "%x" "$(( (1 << n) - 1 ))")
-    fi
-    printf "%s%s" "$chunk" "${suffix:+,$suffix}"
-}
-
-# Print the smp_affinity mask for one zero-based CPU index. Linux expects the
-# least-significant 32 CPU bits at the right of a comma-separated mask.
-_cpu_mask_hex() {
-    local cpu group bit mask
-    cpu="$1"
-    group=$((cpu / 32))
-    bit=$((cpu % 32))
-    mask=$(printf "%x" "$((1 << bit))")
-    while [ "$group" -gt 0 ]; do
-        mask="${mask},00000000"
-        group=$((group - 1))
-    done
-    printf "%s" "$mask"
-}
-
-# Detect VM/hypervisor environment.
-# Returns 0 (true) if running inside a VM, 1 (false) on physical hardware.
-# Used to choose between irqbalance (physical) and manual IRQ affinity (VM).
-_is_vm() {
-    # CPUID hypervisor flag — set by KVM, QEMU, VMware, Hyper-V, Xen
-    grep -qw "hypervisor" /proc/cpuinfo 2>/dev/null && return 0
-    # Xen guests may not expose the CPUID hypervisor flag or DMI data.
-    [ -d /proc/xen ] && return 0
-    # DMI sys_vendor fallback (covers cases where CPUID bit is hidden)
-    local _sv
-    _sv=$(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null \
-          | tr '[:upper:]' '[:lower:]')
-    case "$_sv" in
-        *qemu*|*kvm*|*vmware*|*virtualbox*|*xen*|*microsoft*) return 0 ;;
-    esac
-    return 1
 }
 
 # ---- Per-interface functions ------------------------------------------------
@@ -81,60 +31,23 @@ set_cpu_governor() {
     fi
 }
 
-# ---- Per-interface functions ------------------------------------------------
-
-# Apply RPS/XPS — spreads packet processing across all CPUs per interface queue
-apply_rps_xps() {
-    local iface="$1" mask q rps xps flow_cnt
-    mask=$(_all_mask_hex)
-    for q in $(seq 0 31); do
-        rps="/sys/class/net/$iface/queues/rx-$q/rps_cpus"
-        xps="/sys/class/net/$iface/queues/tx-$q/xps_cpus"
-        flow_cnt="/sys/class/net/$iface/queues/rx-$q/rps_flow_cnt"
-        [ -f "$rps" ] || break
-        printf "%s\n" "$mask" > "$rps" 2>/dev/null || true
-        [ -f "$xps" ] && printf "%s\n" "$mask" > "$xps" 2>/dev/null || true
-        # rps_flow_cnt per queue: enables per-flow CPU affinity tracking.
-        [ -f "$flow_cnt" ] && echo "4096" > "$flow_cnt" 2>/dev/null || true
+# Clear forced RPS/XPS settings. Native virtio/RSS multiqueue already maps each
+# queue to an IRQ; forcing every queue onto every CPU destroys queue locality,
+# increases packet reordering and was the main throughput regression on PVE.
+clear_forced_rps_xps() {
+    local iface="$1" q file
+    for q in /sys/class/net/"$iface"/queues/rx-*; do
+        [ -d "$q" ] || continue
+        file="$q/rps_cpus"
+        [ -f "$file" ] && echo 0 > "$file" 2>/dev/null || true
+        file="$q/rps_flow_cnt"
+        [ -f "$file" ] && echo 0 > "$file" 2>/dev/null || true
     done
-}
-
-# Bind MSI-X IRQs to different CPUs (round-robin per queue).
-bind_msix_irqs() {
-    local iface="$1"
-    local msi_dir="/sys/class/net/$iface/device/msi_irqs"
-    local irq_file="/sys/class/net/$iface/device/irq"
-    local n i cpu_index mhex irq total
-    n=$(_cpu_count)
-    i=0
-
-    if [ -d "$msi_dir" ]; then
-        total=0
-        for irq in $(ls "$msi_dir" 2>/dev/null | sort -n); do
-            cpu_index=$(( i % n ))
-            mhex=$(_cpu_mask_hex "$cpu_index")
-            echo "$mhex" > "/proc/irq/$irq/smp_affinity" 2>/dev/null || true
-            i=$(( i + 1 ))
-            total=$(( total + 1 ))
-        done
-        echo "[netopt] $iface: distributed $total MSI-X IRQs across $n CPUs"
-    elif [ -f "$irq_file" ]; then
-        irq=$(cat "$irq_file" 2>/dev/null)
-        [ -n "$irq" ] && echo "$(_all_mask_hex)" > "/proc/irq/$irq/smp_affinity" 2>/dev/null || true
-        echo "[netopt] $iface: legacy IRQ $irq, affinity=0x$(_all_mask_hex)"
-    fi
-}
-
-# Activate NIC multiqueue at runtime.
-activate_multiqueue() {
-    local iface="$1" n max_q target
-    command -v ethtool >/dev/null 2>&1 || return
-    n=$(_cpu_count)
-    max_q=$(ethtool -l "$iface" 2>/dev/null | awk '/^Combined:/{print $2; exit}')
-    [ -z "$max_q" ] || [ "$max_q" = "0" ] || [ "$max_q" = "n/a" ] && return
-    target=$(( max_q > n ? n : max_q ))
-    ethtool -L "$iface" combined "$target" 2>/dev/null && \
-        echo "[netopt] $iface: multiqueue combined=$target" || true
+    for q in /sys/class/net/"$iface"/queues/tx-*; do
+        [ -d "$q" ] || continue
+        file="$q/xps_cpus"
+        [ -f "$file" ] && echo 0 > "$file" 2>/dev/null || true
+    done
 }
 
 # Enable NIC hardware offloads (GRO/GSO/TSO/checksum/scatter-gather).
@@ -167,6 +80,7 @@ apply_nic_offloads() {
 maximize_ring_buffer() {
     local iface="$1"
     command -v ethtool >/dev/null 2>&1 || return
+    [ "$(ethtool -i "$iface" 2>/dev/null | awk '/^driver:/{print $2}')" = "virtio_net" ] && return
 
     local max_rx max_tx
     max_rx=$(ethtool -g "$iface" 2>/dev/null | awk '/^RX:/{print $2; exit}')
@@ -186,20 +100,18 @@ maximize_ring_buffer() {
 apply_interrupt_coalescing() {
     local iface="$1"
     command -v ethtool >/dev/null 2>&1 || return
+    [ "$(ethtool -i "$iface" 2>/dev/null | awk '/^driver:/{print $2}')" = "virtio_net" ] && return
 
-    # Adaptive coalescing: NIC driver auto-tunes based on traffic load
-    ethtool -C "$iface" adaptive-rx on adaptive-tx on 2>/dev/null || \
-    # Fallback: manual coalescing if adaptive not supported
-    ethtool -C "$iface" rx-usecs 50 tx-usecs 50 rx-frames 64 tx-frames 64 2>/dev/null || true
+    # Use adaptive mode only; do not force a 50us delay on unsupported devices.
+    ethtool -C "$iface" adaptive-rx on adaptive-tx on 2>/dev/null || return
 
     echo "[netopt] $iface: interrupt coalescing configured"
 }
 
-# Increase TX queue length for high-speed interfaces.
-# Default txqueuelen=1000; at 5Gbps this fills in <1ms causing drops during bursts.
+# Restore the normal TX queue length; oversized queues add latency under load.
 set_txqueuelen() {
     local iface="$1"
-    ip link set "$iface" txqueuelen 5000 2>/dev/null || true
+    ip link set "$iface" txqueuelen 1000 2>/dev/null || true
 }
 
 # Enumerate physical NICs — skip bridges, tun, ppp, virtual
@@ -218,8 +130,6 @@ get_physical_ifaces() {
 }
 
 # Enumerate PPPoE / PPP WAN interfaces.
-# These are virtual netdevs (no /device dir) so get_physical_ifaces skips them,
-# but PPPoE decapsulation processing benefits from RPS to spread softirq load.
 get_ppp_ifaces() {
     local list="" name
     for dev in /sys/class/net/*; do
@@ -268,15 +178,6 @@ apply_tcp_tuning() {
     # --- TCP fast open (reduce connection setup latency) ---
     echo "3" > /proc/sys/net/ipv4/tcp_fastopen 2>/dev/null || true
 
-    # --- Increase initial congestion window on ALL default routes ---
-    # Multi-WAN: may have multiple default routes (metric-based).
-    # initcwnd=128 (~192KB) lets BBR probe at high speed from first packet.
-    local route
-    ip route show default 2>/dev/null | while read -r route; do
-        ip route change $route initcwnd 128 initrwnd 128 2>/dev/null || true
-    done
-    echo "[netopt] all default routes: initcwnd=128, initrwnd=128"
-
     # --- Connection tracking tuning ---
     # 3×2G WAN aggregate with 2.5w+ concurrent connections per service.
     # max=524288 entries, buckets=131072 (ratio 1:4 — keeps hash chain length ≤4,
@@ -292,22 +193,20 @@ apply_tcp_tuning() {
     echo "[netopt] conntrack: max=524288, buckets=131072, established_timeout=7200s"
 
     # --- Kernel network stack backlog & NAPI budget ---
-    # 5Gbps with mixed packet sizes: ~400k-4M pps depending on payload.
-    # netdev_max_backlog: inter-CPU packet queue. Default 1000 → drops at 5Gbps.
-    echo "50000" > /proc/sys/net/core/netdev_max_backlog 2>/dev/null || true
-    # NAPI budget: packets processed per softirq cycle.
-    # Higher = more throughput, slightly more latency jitter (acceptable for router).
-    echo "1200" > /proc/sys/net/core/netdev_budget 2>/dev/null || true
-    echo "30000" > /proc/sys/net/core/netdev_budget_usecs 2>/dev/null || true
-    echo "[netopt] net.core: backlog=50000, budget=1200, budget_usecs=30000"
+    # Keep NAPI close to upstream defaults. Very long 30ms softirq runs starve
+    # virtio TX completion and make repeated speed tests ramp up extremely slowly.
+    echo "5000" > /proc/sys/net/core/netdev_max_backlog 2>/dev/null || true
+    echo "300" > /proc/sys/net/core/netdev_budget 2>/dev/null || true
+    echo "2000" > /proc/sys/net/core/netdev_budget_usecs 2>/dev/null || true
+    echo "[netopt] net.core: backlog=5000, budget=300, budget_usecs=2000"
 
     # --- Socket listen backlog ---
     echo "16384" > /proc/sys/net/core/somaxconn 2>/dev/null || true
     echo "16384" > /proc/sys/net/ipv4/tcp_max_syn_backlog 2>/dev/null || true
 
-    # --- RPS socket flow entries ---
-    # 65536 entries (power of 2) for 5w+ concurrent flows across 3 WANs.
-    echo "65536" > /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null || true
+    # RPS is intentionally disabled: virtio/RSS multiqueue preserves queue/CPU
+    # locality better than software redistribution on this router workload.
+    echo "0" > /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null || true
 
     # --- Port range (multi-WAN needs more ephemeral ports) ---
     # Default 32768-60999 = 28231 ports; with 3 WANs this limits concurrent connections.
@@ -351,9 +250,9 @@ apply_tcp_tuning() {
 # ---- Main entrypoints -------------------------------------------------------
 
 start() {
-    local n ifaces iface _VM_ENV
+    local n ifaces iface
     n=$(_cpu_count)
-    echo "[netopt] starting — ${n} CPU(s) detected, mask=0x$(_all_mask_hex)"
+    echo "[netopt] starting — ${n} CPU(s) detected"
     echo "[netopt] target: 5Gbps NIC + 3×2G WAN aggregate"
 
     # 1. CPU governor → performance
@@ -362,37 +261,13 @@ start() {
     # 2. TCP/IP stack tuning (BBR + buffers + conntrack + multi-WAN)
     apply_tcp_tuning
 
-    # 3. IRQ balancing strategy — VM vs physical
-    # Problem: irqbalance is a daemon that re-distributes IRQ affinity every
-    # ~10 seconds. If we start irqbalance AND then set smp_affinity manually
-    # (bind_msix_irqs), irqbalance will silently override our settings.
-    #
-    # Physical host: irqbalance understands real NUMA/cache topology and does
-    #   a better job than static round-robin. Let it handle IRQs; skip manual
-    #   bind_msix_irqs so the two don't fight each other.
-    #
-    # VM (PVE/KVM/VMware/…): all vCPUs are topologically equal — irqbalance
-    #   has no meaningful topology info and often consolidates all virtio queue
-    #   IRQs onto 1-2 vCPUs, creating a bottleneck. Manual round-robin across
-    #   all vCPUs (bind_msix_irqs, step 4) is more predictable and persistent.
-    _VM_ENV=0
-    if _is_vm; then
-        _VM_ENV=1
-        # irqbalance may already have been started earlier in the boot order.
-        # It continuously rewrites smp_affinity, so it must be stopped as well
-        # as disabled before the manual settings below are applied.
-        if [ -x /etc/init.d/irqbalance ]; then
-            /etc/init.d/irqbalance stop 2>/dev/null || true
-            /etc/init.d/irqbalance disable 2>/dev/null || true
-        fi
-        echo "[netopt] VM/hypervisor detected — irqbalance stopped; manual IRQ affinity will be applied"
-    elif [ -x /etc/init.d/irqbalance ]; then
+    # 3. Let irqbalance manage MSI-X/virtio IRQs on both VM and bare metal.
+    # Do not combine it with manual affinity writes.
+    if [ -x /etc/init.d/irqbalance ]; then
         /etc/init.d/irqbalance enable  2>/dev/null || true
-        # Do not restart a running daemon at S99: its restart needlessly
-        # reshuffles active IRQs. Start it only when it is not already running.
         /etc/init.d/irqbalance status >/dev/null 2>&1 || \
             /etc/init.d/irqbalance start 2>/dev/null || true
-        echo "[netopt] physical host — irqbalance enabled (manual IRQ affinity skipped)"
+        echo "[netopt] irqbalance enabled; manual IRQ affinity disabled"
     fi
 
     # 4. Per-interface optimization (physical NICs)
@@ -402,50 +277,23 @@ start() {
     else
         for iface in $ifaces; do
             echo "[netopt] optimizing: $iface"
-            activate_multiqueue      "$iface"
             maximize_ring_buffer     "$iface"
             apply_nic_offloads       "$iface"
             apply_interrupt_coalescing "$iface"
             set_txqueuelen           "$iface"
-            apply_rps_xps            "$iface"
-            # Manual IRQ affinity: VM only.
-            # On physical host irqbalance (step 3) handles distribution;
-            # calling bind_msix_irqs here would conflict with it.
-            [ "$_VM_ENV" -eq 1 ] && bind_msix_irqs "$iface"
+            clear_forced_rps_xps     "$iface"
         done
     fi
 
-    # 5. PPPoE/PPP WAN interfaces — apply RPS to spread decapsulation softirq load.
-    # PPPoE is a classic x86 bottleneck: the pppoe-wan netdev processing tends to
-    # serialize on one CPU. RPS on the ppp interface distributes the post-decap
-    # packet processing across all cores. Combined with software flow_offloading
-    # (set in 20-firewall.sh), this lets PPPoE traffic reach near line rate.
-    # txqueuelen on ppp also enlarged to absorb bursts.
+    # 5. PPPoE/PPP WAN interfaces — clear legacy forced RPS and enlarge TX queue.
     for iface in $(get_ppp_ifaces); do
         echo "[netopt] optimizing PPPoE iface: $iface"
-        apply_rps_xps  "$iface"   # only touches rx/tx queues (safe on virtual netdev)
+        clear_forced_rps_xps "$iface"
         set_txqueuelen "$iface"
     done
 
-    # 6. Install persistent initcwnd hotplug script
-    # apply_tcp_tuning() runs `ip route change ... initcwnd 128` above, but that
-    # only patches the route object that exists at boot time.  A PPPoE reconnect
-    # or DHCP renew replaces the route object entirely, silently resetting
-    # initcwnd back to the kernel default (10).  This hotplug fires on every
-    # interface "ifup" event and re-stamps the current default route(s).
-    mkdir -p /etc/hotplug.d/iface
-    cat > /etc/hotplug.d/iface/99-initcwnd << 'HOTPLUG_EOF'
-#!/bin/sh
-# Installed by netopt: re-apply initcwnd=128 / initrwnd=128 after every WAN
-# reconnect (PPPoE, DHCP renew, etc.) so TCP slow-start always uses the large
-# initial window regardless of how many times the WAN interface has cycled.
-[ "$ACTION" = "ifup" ] || exit 0
-ip route show default | while IFS= read -r _r; do
-    ip route change $_r initcwnd 128 initrwnd 128 2>/dev/null || true
-done
-HOTPLUG_EOF
-    chmod +x /etc/hotplug.d/iface/99-initcwnd
-    echo "[netopt] hotplug/99-initcwnd installed (initcwnd=128 persists across WAN reconnects)"
+    # Remove the regression-prone hotplug file from images upgraded in place.
+    rm -f /etc/hotplug.d/iface/99-initcwnd
 
     echo "[netopt] completed"
 }
