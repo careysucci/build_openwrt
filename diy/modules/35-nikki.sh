@@ -1,12 +1,16 @@
 #!/bin/sh
 # =============================================================
 # Module: 35-nikki.sh
-# Scope:  Nikki (luci-app-nikki / mihomo) UCI pre-configuration
+# Scope:  Nikki (luci-app-nikki / mihomo) — point profile_name
+#         at the bundled yaml profile only
 # Runs:   First boot via zzz-default-settings orchestrator
 #
-# Purpose: Set nikki UCI values to use our pre-installed profile
-#          and prevent the UI from overwriting critical settings.
-#          Config mirrors clash-all-noicon-clash.yaml logic exactly.
+# Design: The ONLY active action is pointing Nikki at the
+#         pre-installed profile:
+#           /etc/nikki/profiles/nikki-config.yaml
+#         All other UCI tuning (ports, modes, DNS, API key ...)
+#         is DISABLED — kept in the disabled block at the bottom
+#         of this file for easy restoration.
 # =============================================================
 
 [ -f /etc/init.d/nikki ] || {
@@ -14,12 +18,22 @@
     return 0 2>/dev/null || exit 0
 }
 
-# --- Use custom profile (disable UI config generation) ---
+# ── Use bundled profile (the ONLY active settings) ────────────
 # nikki reads profile from /etc/nikki/profiles/ when profile_name is set.
 # This prevents the web UI from generating and overwriting the yaml.
 uci set nikki.config=config
-uci set nikki.config.enabled='0'
 uci set nikki.config.profile_name='nikki-config'
+uci commit nikki
+echo "[35-nikki] profile_name → nikki-config (all other UCI tuning disabled)"
+
+# =============================================================
+# DISABLED: historical UCI pre-configuration (NOT executed)
+# Kept for reference only. Restore by moving the desired lines
+# back above this block.
+# =============================================================
+: <<'DISABLED_UCI_TUNING'
+
+uci set nikki.config.enabled='0'
 
 # --- Operation mode: tproxy (same as OpenClash) ---
 uci set nikki.proxy=proxy
@@ -61,4 +75,4 @@ uci commit nikki
 echo "[35-nikki] UCI pre-configured — profile: nikki-config (disabled by default)"
 echo "[35-nikki] To activate: disable OpenClash first, then enable nikki"
 
-
+DISABLED_UCI_TUNING

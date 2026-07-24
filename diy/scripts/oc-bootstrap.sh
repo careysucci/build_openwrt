@@ -7,8 +7,8 @@
 #   oc-bootstrap.sh <subscription_url>
 #
 # What it does:
-#   Downloads a Clash-format subscription (must have 'proxies:' list)
-#   and saves it as the proxy-provider cache file that mihomo reads.
+#   Downloads a subscription and saves it as the proxy-provider
+#   cache file that mihomo reads. No format validation is performed.
 #   OpenClash must be DISABLED while running this (default on first boot).
 #
 # After running, enable OpenClash:
@@ -27,8 +27,8 @@ _print_usage() {
     echo ""
     echo "Requirements:"
     echo "  - OpenClash must be DISABLED (it is by default on first boot)"
-    echo "  - The subscription URL must return Clash YAML format (contains 'proxies:' list)"
-    echo "  - Some providers need ?client_type=clash or similar parameter"
+    echo "  - No format validation is performed — a Clash-format subscription"
+    echo "    is recommended (some providers need ?client_type=clash)"
     echo ""
     echo "After running this script, enable OpenClash:"
     echo "  uci set openclash.config.enable=1 && uci commit openclash"
@@ -68,31 +68,17 @@ if ! curl -fsSL --connect-timeout 30 --max-time 120 "$SUB_URL" -o "$TMP_FILE"; t
     exit 1
 fi
 
-# Check if it's a Clash YAML with proxies
-if grep -q "^proxies:" "$TMP_FILE" 2>/dev/null; then
-    PROXY_COUNT=$(grep -c "^  - " "$TMP_FILE" 2>/dev/null || echo 0)
-    cp "$TMP_FILE" "$PROVIDER_PATH"
-    rm -f "$TMP_FILE"
-    echo "[oc-bootstrap] ✓ Success: $PROXY_COUNT node entries imported"
-    echo "[oc-bootstrap] ✓ Provider file saved: $PROVIDER_PATH"
-    echo ""
-    echo "Now enable and start OpenClash:"
-    echo "  uci set openclash.config.enable=1 && uci commit openclash"
-    echo "  /etc/init.d/openclash enable && /etc/init.d/openclash start"
-    echo ""
-    echo "Then open the OpenClash dashboard to verify nodes appear:"
-    echo "  http://$(uci get network.lan.ipaddr 2>/dev/null || echo '172.16.3.18'):9090/ui/"
-else
-    echo "[oc-bootstrap] ERROR: Downloaded file is not in Clash YAML format."
-    echo "  Expected a file with 'proxies:' at the top level."
-    echo "  First 8 lines of downloaded content:"
-    head -8 "$TMP_FILE" 2>/dev/null | sed 's/^/  /'
-    rm -f "$TMP_FILE"
-    echo ""
-    echo "Tips:"
-    echo "  - Add '?client_type=clash' or '?clash=1' to your subscription URL"
-    echo "  - Contact your provider for the Clash-format subscription link"
-    echo "  - Some providers: append '&flag=clash' or '&type=clash' to the URL"
-    exit 1
-fi
+# 说明：不强制校验内容格式，下载到什么就写入什么。
+PROXY_COUNT=$(grep -c "^  - " "$TMP_FILE" 2>/dev/null || echo 0)
+cp "$TMP_FILE" "$PROVIDER_PATH"
+rm -f "$TMP_FILE"
+echo "[oc-bootstrap] ✓ Success: $PROXY_COUNT node entries imported"
+echo "[oc-bootstrap] ✓ Provider file saved: $PROVIDER_PATH"
+echo ""
+echo "Now enable and start OpenClash:"
+echo "  uci set openclash.config.enable=1 && uci commit openclash"
+echo "  /etc/init.d/openclash enable && /etc/init.d/openclash start"
+echo ""
+echo "Then open the OpenClash dashboard to verify nodes appear:"
+echo "  http://$(uci get network.lan.ipaddr 2>/dev/null || echo '172.16.3.18'):9090/ui/"
 

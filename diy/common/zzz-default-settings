@@ -9,8 +9,8 @@
 # Module execution order (alphabetical by filename):
 #   10-system.sh    — language, timezone, network, opkg, dhcp
 #   20-firewall.sh  — flow_offloading defaults
-#   30-openclash.sh — OpenClash UCI sync with clash yaml
-#   35-nikki.sh     — Nikki UCI (alternate proxy, disabled by default)
+#   30-openclash.sh — point OpenClash config_path at bundled yaml
+#   35-nikki.sh     — point Nikki profile_name at bundled yaml
 #   36-homeproxy.sh — HomeProxy UCI (alternate proxy, disabled by default)
 #   40-cleanup.sh   — disable unused services, cache cleanup
 #
