@@ -14,9 +14,8 @@
 #      Binary installed as /etc/openclash/core/clash_meta
 #   3. Install oc-bootstrap.sh helper for first-time node setup
 #
+# UCI: core_type=Meta / core_version=linux-amd64-v1
 # Binary path in firmware: /etc/openclash/core/clash_meta
-# Note: UCI core_type/core_version are no longer pre-set — OpenClash
-#       defaults apply (see diy/modules/30-openclash.sh).
 # =============================================================
 
 # ── 1. Install OpenClash YAML config ─────────────────────────
@@ -82,8 +81,8 @@ _inject_sub_url "$TARGET_DIR/package/base-files/files/usr/lib/wyhome/modules/36-
 #   2. MetaCubeX/mihomo releases (upstream mihomo, renamed to clash_meta)
 #      Pattern: mihomo-linux-amd64-compatible-v*.gz
 #
+# UCI: core_type=Meta / core_version=linux-amd64-v1
 # Binary installed as: /etc/openclash/core/clash_meta
-# (UCI core_type/core_version not pre-set — OpenClash defaults apply)
 _CORE_DIR="$TARGET_DIR/package/base-files/files/etc/openclash/core"
 mkdir -p "$_CORE_DIR"
 

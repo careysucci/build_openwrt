@@ -1,19 +1,15 @@
 #!/bin/sh
 # =============================================================
 # Module: 30-openclash.sh
-# Scope:  OpenClash — point config_path at the bundled yaml only
+# Scope:  OpenClash UCI pre-configuration
 # Runs:   First boot via zzz-default-settings orchestrator
 #
-# Design: The ONLY active action is pointing OpenClash at the
-#         pre-installed yaml:
-#           /etc/openclash/config/clash-all-noicon-clash.yaml
-#         All other UCI tuning (ports, modes, DNS hijack, GEO
-#         updates, core selection, subscription placeholder ...)
-#         is DISABLED — kept in the disabled block at the bottom
-#         of this file for easy restoration.
+# Purpose: Keep OpenClash UCI values consistent with
+#          /etc/openclash/config/clash-all-noicon-clash.yaml.
+#          Without this, the LuCI web UI writes default UCI
+#          values on first access and overwrites YAML settings.
 #
-#         The mihomo core binary is pre-bundled at build time by
-#         diy/scripts/build-openclash.sh — unaffected by this change.
+# Reference YAML: clash-all-noicon-clash.yaml (project root)
 # =============================================================
 
 [ -f /etc/init.d/openclash ] || {
@@ -21,17 +17,8 @@
     return 0 2>/dev/null || exit 0
 }
 
-# ── Config file path (the ONLY active setting) ────────────────
+# ── Config file path ──────────────────────────────────────────
 uci set openclash.config.config_path='/etc/openclash/config/clash-all-noicon-clash.yaml'
-uci commit openclash
-echo "[30-openclash] config_path → clash-all-noicon-clash.yaml (all other UCI tuning disabled)"
-
-# =============================================================
-# DISABLED: historical UCI pre-configuration (NOT executed)
-# Kept for reference only. Restore by moving the desired lines
-# back above this block.
-# =============================================================
-: <<'DISABLED_UCI_TUNING'
 
 # ── Operation mode ────────────────────────────────────────────
 # yaml: enhanced-mode: redir-host
@@ -191,4 +178,3 @@ uci set openclash.@subscribe[-1].auto_update_time='2'
 uci commit openclash
 echo "[30-openclash] Subscription placeholder created (DISABLED — fill URL then set enabled=1)"
 
-DISABLED_UCI_TUNING

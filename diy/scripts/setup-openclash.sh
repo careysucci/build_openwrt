@@ -83,8 +83,20 @@ if ! curl -fsSL --connect-timeout 30 --max-time 120 "$SUB_URL" -o "$TMP_FILE" 2>
     exit 1
 fi
 
-# 说明：不强制校验内容格式，下载到什么就写入什么。
-#       （建议使用 Clash 格式订阅，否则 mihomo 可能无法解析节点）
+# 校验是否为 Clash YAML 格式
+if ! grep -q "^proxies:" "$TMP_FILE" 2>/dev/null; then
+    _err "下载的文件不是 Clash YAML 格式（缺少顶级 'proxies:' 字段）"
+    echo ""
+    echo "  文件开头内容："
+    head -8 "$TMP_FILE" 2>/dev/null | sed 's/^/    /'
+    rm -f "$TMP_FILE"
+    echo ""
+    echo "  解决方法："
+    echo "    - 在订阅 URL 末尾加 '?client_type=clash' 或 '&flag=clash'"
+    echo "    - 向机场咨询 Clash 格式订阅链接"
+    exit 1
+fi
+
 PROXY_COUNT=$(grep -c "^  - " "$TMP_FILE" 2>/dev/null || echo 0)
 cp "$TMP_FILE" "$PROVIDER_PATH"
 rm -f "$TMP_FILE"
