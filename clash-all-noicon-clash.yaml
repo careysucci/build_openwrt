@@ -50,7 +50,7 @@ tcp-concurrent: true
 find-process-mode: 'off'           # 关闭进程识别，OpenWrt上无意义，消除每连接的进程查找开销
 keep-alive-interval: 30            # TCP keepalive 30秒，维持长连接减少重连
 keep-alive-idle: 600               # 空闲连接600秒后才开始探测，减少无用探测包
-global-client-fingerprint: chrome  # TLS fingerprint统一为chrome，减少指纹协商开销
+client-fingerprint: chrome  # TLS fingerprint统一为chrome，减少指纹协商开销
 log-level: warning
 
 external-controller: 127.0.0.1:9090
