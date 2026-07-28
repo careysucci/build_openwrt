@@ -18,6 +18,12 @@ proxy-providers:
     # URL 写入后，mihomo 每 interval 秒自动拉取最新节点（无需 Nikki UI 订阅管理）。
     type: http
     url: "http://127.0.0.1:11111/subscription"
+    # SUB-PROXY-FIRSTBOOT-BEGIN
+    # 首次启动窗口期：订阅下载强制直连（DIRECT），绕过规则引擎。
+    # 此时没有任何节点，若经规则引擎必然命中 国外 空组 → 死锁。
+    # setup-nikki.sh 会在节点加载完成后删除本块 → 往后订阅更新恢复走代理组。
+    proxy: DIRECT
+    # SUB-PROXY-FIRSTBOOT-END
     path: "/etc/nikki/run/providers/cc-auto.yaml"
     interval: 86400
     health-check:
@@ -87,6 +93,16 @@ dns:
       - 172.16.3.7
     "geosite:cn":
       - 172.16.3.7
+    # gh-proxy.org（规则集下载源）DNS 走 .7；流量由规则引擎决定（命中内置 cn 库则直连，否则走代理）
+    "+.gh-proxy.org":
+      - 172.16.3.7
+    # SUB-DNS-FIRSTBOOT-BEGIN
+    # 订阅域名首次启动窗口期走 .7 解析（此时无节点，.6 上游经代理不可用 → 解析死锁）。
+    # setup-nikki.sh 会把占位域名替换为真实订阅域名；
+    # 节点加载完成后删除本块 → 往后订阅域名与其他国外域名一样走 .6 解析。
+    "+.sub-placeholder-7f3a9c.invalid":
+      - 172.16.3.7
+    # SUB-DNS-FIRSTBOOT-END
   fake-ip-filter-mode: blacklist
   fake-ip-filter:
     - "+.lan"

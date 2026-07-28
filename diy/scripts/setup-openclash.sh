@@ -21,6 +21,8 @@
 YAML_CFG="/etc/openclash/config/clash-all-noicon-clash.yaml"
 PROVIDER_PATH="/etc/openclash/config/providers/cc-auto.yaml"
 PLACEHOLDER_URL="http://127.0.0.1:11111/subscription"
+FIRST_RUN=0   # 首次配置标志：1=节点就绪后需执行"切回正常分流"步骤
+API_SECRET="oc_6Qf9v2LmP8xT4rN1kY7sDz3aH5uWc"   # 与 yaml 中 secret 一致
 
 # ─── 颜色输出（busybox ash 兼容）────────────────────────────
 _ok()   { echo "  [✓] $*"; }
@@ -131,6 +133,13 @@ else
         if grep -q "$SUB_URL" "$YAML_CFG" 2>/dev/null; then
             _ok "YAML proxy-provider URL 已写入（首次配置）"
             _info "mihomo 将每 86400 秒（24h）自动拉取最新节点"
+            FIRST_RUN=1
+            # 订阅域名写入 nameserver-policy 占位条目（首次窗口走 .7 解析，破无节点解析死锁）
+            SUB_DOMAIN=$(printf '%s' "$SUB_URL" | sed -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|/.*$||' -e 's|:.*$||')
+            if [ -n "$SUB_DOMAIN" ]; then
+                sed -i "s|+\.sub-placeholder-7f3a9c\.invalid|+.${SUB_DOMAIN}|" "$YAML_CFG"
+                _ok "订阅域名 ${SUB_DOMAIN} 首次启动 DNS → .7（节点就绪后自动切回 .6）"
+            fi
         else
             _err "YAML 写入失败，请手动编辑："
             echo "      文件  : $YAML_CFG"
@@ -158,6 +167,36 @@ _info "设置 OpenClash 开机自启..."
 _info "启动 OpenClash（mihomo 内核加载中，约需 5-15 秒）..."
 /etc/init.d/openclash start
 _ok "OpenClash 启动命令已执行"
+
+# ─── 步骤 4（仅首次）：节点就绪后切回正常分流 ──────────────
+if [ "$FIRST_RUN" -eq 1 ]; then
+    _step "4: 切换订阅域名回正常分流（DNS → .6，下载 → 规则引擎）"
+    _info "等待 mihomo 内核加载节点缓存（约 15 秒）..."
+    sleep 15
+    # 删除首次窗口期临时配置：DNS 占位块 + provider 直连行
+    sed -i '/# SUB-DNS-FIRSTBOOT-BEGIN/,/# SUB-DNS-FIRSTBOOT-END/d' "$YAML_CFG"
+    sed -i '/# SUB-PROXY-FIRSTBOOT-BEGIN/,/# SUB-PROXY-FIRSTBOOT-END/d' "$YAML_CFG"
+    _ok "已切换：订阅域名 DNS → .6，订阅下载 → 规则引擎（国外组）"
+    _RELOADED=0
+    for _try in 1 2 3 4 5; do
+        if curl -fsS -m 5 -X PUT \
+            -H "Authorization: Bearer $API_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"path\":\"$YAML_CFG\"}" \
+            "http://127.0.0.1:9090/configs?force=true" >/dev/null 2>&1; then
+            _RELOADED=1
+            break
+        fi
+        sleep 10
+    done
+    if [ "$_RELOADED" -eq 1 ]; then
+        _ok "mihomo 已热重载，正常分流生效"
+    else
+        _info "热重载未响应，执行 OpenClash restart 使配置生效..."
+        /etc/init.d/openclash restart
+        _ok "OpenClash 已重启，正常分流生效"
+    fi
+fi
 
 # ─── 完成 ────────────────────────────────────────────────
 ROUTER_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo '172.16.3.18')
