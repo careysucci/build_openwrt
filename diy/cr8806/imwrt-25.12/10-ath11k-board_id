@@ -1,0 +1,32 @@
+#!/bin/sh
+# Select the correct BDF (board_id) for Redmi AX3000 / CR880X by PA type.
+# M79 variant: board_id 0x10, M81 variant: board_id 0x24.
+# The PA type is stored in the u-boot environment (0:APPSBLENV).
+
+[ -e /lib/firmware/$FIRMWARE ] && exit 0
+
+. /lib/functions.sh
+
+set_board_id() {
+	echo "$1" > /lib/firmware/$FIRMWARE
+}
+
+board=$(board_name)
+
+case "$FIRMWARE" in
+"ath11k/IPQ5018/hw1.0/board_id-ahb-c000000.wifi")
+	case "$board" in
+	redmi,ax3000)
+		idx="$(find_mtd_index 0:APPSBLENV)"
+		[ -z "$idx" ] && exit 1
+		case "$(strings /dev/mtdblock$idx | sed -n 's/^wl_pa_type=//p' | head -n 1)" in
+		epa) set_board_id 0x24 ;;
+		xpa|ipa|*) set_board_id 0x10 ;;
+		esac
+		;;
+	esac
+	;;
+*)
+	exit 1
+	;;
+esac
