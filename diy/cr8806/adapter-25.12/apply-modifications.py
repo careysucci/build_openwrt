@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""In-place modifications for Redmi AX3000 / CR880X on ImmortalWrt openwrt-25.12.
+"""In-place modifications for Redmi AX3000 / CR880X on official OpenWrt /
+ImmortalWrt openwrt-25.12.
 
 Every edit is anchored on an exact string from the upstream file; the script
 fails loudly (exit 1) if an anchor is missing so upstream drift is detected at
@@ -64,6 +65,10 @@ define Device/redmi_ax3000
 	NAND_SIZE := 128m
 	DEVICE_DTS_CONFIG := config@mp02.1
 	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-redmi_ax3000
+	# factory.img: same ubinized UBI payload as factory.ubi, .img suffix for
+	# flashing tools that expect it (U-boot TFTP accepts both).
+	IMAGES += factory.img
+	IMAGE/factory.img := append-ubi
 endef
 TARGET_DEVICES += redmi_ax3000
 """,

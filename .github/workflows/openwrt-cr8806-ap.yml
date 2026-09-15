@@ -6,7 +6,7 @@
 #
 # Target:  qualcommax/ipq50xx (Qualcomm IPQ5018, aarch64, kernel 6.12)
 # Source:  official immortalwrt/immortalwrt @ openwrt-25.12, with the CR880x
-#          device support injected by diy/cr8806/imwrt-25.12 (DTS, base-files,
+#          device support injected by diy/cr8806/adapter-25.12 (DTS, base-files,
 #          ipq-wifi BDF entry, ath11k board_id patches — ported from the
 #          kmiit/Redmi_AX3000_immortalwrt adaptation, most of which is already
 #          upstream in 25.12: QCN6122, RSSI fix, MPD, ge_phy, caldata helpers).
@@ -16,6 +16,7 @@
 #
 # Images:  bin/targets/qualcommax/ipq50xx/
 #            *-squashfs-factory.ubi     → flash via U-boot TFTP
+#            *-squashfs-factory.img     → same UBI payload, .img suffix
 #            *-squashfs-sysupgrade.bin  → flash via LuCI/sysupgrade
 #
 # Independence: this workflow uses diy/cr8806/diy-ap.sh only; the shared
@@ -47,7 +48,7 @@ env:
   REPO_BRANCH: openwrt-25.12
   CONFIG_FILE: diy/cr8806/immortalwrt_ap.config
   DIY_AP_SH: diy/cr8806/diy-ap.sh
-  ADAPT_SH: diy/cr8806/imwrt-25.12/apply-cr8806.sh
+  ADAPT_SH: diy/cr8806/adapter-25.12/apply-cr8806.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
@@ -208,7 +209,7 @@ jobs:
           echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, kernel 6.12)" >> release.txt
           echo "Mode: bridged AP — all ports bridged, DHCP/firewall off, mgmt http://172.16.3.19" >> release.txt
           echo "WiFi: 2.4G+5G SSID 'WyHouse' (key wyhouse8888), 802.11r/k/v roaming enabled" >> release.txt
-          echo "Flash: *-squashfs-factory.ubi via U-boot TFTP | *-squashfs-sysupgrade.bin via LuCI" >> release.txt
+          echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP | *-squashfs-sysupgrade.bin via LuCI" >> release.txt
           echo "Date: $(date)" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 

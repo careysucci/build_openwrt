@@ -1,6 +1,6 @@
 #!/bin/bash
-# Inject Redmi AX3000 / Xiaomi CR880X device support into an ImmortalWrt
-# openwrt-25.12 source tree.
+# Inject Redmi AX3000 / Xiaomi CR880X device support into an official
+# OpenWrt / ImmortalWrt openwrt-25.12 source tree.
 #
 # Adapted from kmiit/Redmi_AX3000_immortalwrt (branch redmi_ax3000-24.10):
 #   - DTS rewritten to the 25.12 style (6.12 kernel, upstream dtsi layout,

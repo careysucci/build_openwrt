@@ -52,6 +52,11 @@ uci set network.lan.gateway='172.16.3.18'
 uci set network.lan.dns='172.16.3.18'
 uci set network.lan.delegate='0'
 uci -q delete network.lan.ip6assign
+
+# Packet steering: spread RX softirq load across both A53 cores, so a single
+# core cannot bottleneck WiFi<->wired bridging at gigabit line rate.
+# (netifd >= 22.03 honors network.globals.packet_steering → RPS on all ifaces)
+uci set network.globals.packet_steering='1'
 uci commit network
 
 # ---- 2. Disable DHCP/DNS/firewall (main router's job) ---------------

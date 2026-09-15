@@ -1,23 +1,33 @@
 #
 #
-#
 # File: .github/workflows/openwrt-cr8806.yml
-# Description: Build OpenWrt for Xiaomi CR8806 / Redmi AX3000 using GitHub Actions
+# Description: Build official OpenWrt (openwrt-25.12) AP firmware for Xiaomi CR8806 / Redmi AX3000
 #
-# Target:  ipq50xx/arm (Qualcomm IPQ5018, Cortex-A53, kernel 5.15)
-# Source:  hzyitc/openwrt-redmi-ax3000 — the only mature tree supporting
-#          CR880x. LEDE / openwrt / immortalwrt have NO CR8806 support.
-# Images:  bin/targets/ipq50xx/arm/
-#            *-squashfs-nand-factory.ubi   → flash via U-boot TFTP
-#            *-squashfs-nand-sysupgrade.bin → flash via LuCI/sysupgrade
+# Target:  qualcommax/ipq50xx (Qualcomm IPQ5018, aarch64, kernel 6.12)
+# Source:  official openwrt/openwrt @ openwrt-25.12, with the CR880x
+#          device support injected by diy/cr8806/adapter-25.12 (DTS, base-files,
+#          ipq-wifi BDF entry, ath11k board_id patches — ported from the
+#          kmiit/Redmi_AX3000_immortalwrt adaptation, most of which is already
+#          upstream in 25.12: QCN6122, RSSI fix, MPD, ge_phy, caldata helpers).
+#          Full ath11k stack: 2.4G (IPQ5018) + 5G (QCN6122) both work.
+# Profile: pure bridged AP — no proxy/NAS apps; first boot applies
+#          bridge + dual-band WiFi (802.11r/k/v) via diy/cr8806/99-ap-bridge.
+# Perf:    irqbalance (package) + packet_steering + GRO (99-ap-bridge/netopt)
+#          tuned for gigabit line rate — note all ports are 1GbE.
 #
-# Copyright (c) 2019-2024
+# Images:  bin/targets/qualcommax/ipq50xx/
+#            *-squashfs-factory.ubi     → flash via U-boot TFTP
+#            *-squashfs-factory.img     → same UBI payload, .img suffix
+#            *-squashfs-sysupgrade.bin  → flash via LuCI/sysupgrade
+#
+# Independence: this workflow uses diy/cr8806/diy-ap.sh only; the shared
+# diy-part1.sh / diy-part2.sh are untouched (LEDE/x86 unaffected).
 #
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
 
-name: OpenWrt CR8806 Builder
+name: OpenWrt CR8806 AP (official) Builder
 
 on:
   repository_dispatch:
@@ -33,29 +43,20 @@ on:
         type: boolean
         required: false
         default: false
-      golang_verson:
-        description: 'golang version (needed by nikki/mihomo on 23.05 base)'
-        type: choice
-        required: true
-        options:
-          - 1.26
-          - 1.25
-          - 1.24
 
 env:
-  REPO_URL: https://github.com/hzyitc/openwrt-redmi-ax3000.git
-  REPO_BRANCH: ipq50xx-mainline-kernel-5.15-openwrt-23.05
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: diy/cr8806/lean_auto.config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  REPO_BRANCH: openwrt-25.12
+  CONFIG_FILE: diy/cr8806/official_ap.config
+  DIY_AP_SH: diy/cr8806/diy-ap.sh
+  ADAPT_SH: diy/cr8806/adapter-25.12/apply-cr8806.sh
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   AUTHORED_BY: Wy.House
   IMG_PREFIX: WyHouse
   TARGET_MATRIX: cr8806
-  RELEASE_NAME: WyWrt-Ap
+  RELEASE_NAME: WyWrt-AP-official
   TZ: Asia/Shanghai
 
 jobs:
@@ -91,7 +92,7 @@ jobs:
           gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
           python3-setuptools rsync swig unzip zlib1g-dev file wget \
           llvm python3-pyelftools libpython3-dev aria2 jq qemu-utils ccache rename \
-          libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev dwarves
+          libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev dwarves zstd
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone "$TZ"
@@ -122,63 +123,18 @@ jobs:
           ln -sf /mnt/${{ env.TARGET_MATRIX }}/bin ${{ env.TARGET_MATRIX }}/bin
           ln -sf /mnt/${{ env.TARGET_MATRIX }}/staging_dir ${{ env.TARGET_MATRIX }}/staging_dir
 
-      - name: Load custom feeds
-        run: |
-          chmod +x ./$DIY_P1_SH && ./$DIY_P1_SH
-
-      - name: Update feeds
-        run: |
-          cd ${{ env.TARGET_MATRIX }}
-          ./scripts/feeds update -a && ./scripts/feeds install -a
-          # update golang — 23.05 ships go 1.20, too old for mihomo/nikki;
-          # use selected branch if provided (workflow_dispatch),
-          # otherwise clone latest (repository_dispatch has no inputs)
-          rm -rf feeds/packages/lang/golang
-          GOLANG_VER="${{ inputs.golang_verson }}"
-          if [ -n "$GOLANG_VER" ]; then
-            git clone https://github.com/kenzok8/golang -b "$GOLANG_VER" feeds/packages/lang/golang
-          else
-            git clone https://github.com/kenzok8/golang feeds/packages/lang/golang
-          fi
-          # clean plugins
-          rm -rf feeds/packages/utils/v2dat
-          rm -rf feeds/packages/net/{alist,adguardhome,brook,gost,mosdns,redsocks*,smartdns,trojan*,v2ray*,xray*}
-
       - name: Load custom configuration
-        env:
-          # Expose token for authenticated GitHub API calls in build-openclash.sh
-          # (unauthenticated calls are rate-limited to 60/hr and often fail on busy runners)
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          [ -e .config ] && cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} ${{ env.TARGET_MATRIX }}/.config
-          chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
+          # AP build: standalone diy script (banner/branding/first-boot AP
+          # provisioning). No third-party feeds — plain OpenWrt feeds only.
+          chmod +x ./$DIY_AP_SH && ./$DIY_AP_SH
           cd ${{ env.TARGET_MATRIX }}
+          # Inject CR8806 device support into the official 25.12 tree
+          # (must happen before defconfig so the device target exists).
+          bash $GITHUB_WORKSPACE/$ADAPT_SH
           ./scripts/feeds update -a && ./scripts/feeds install -a
           cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           make defconfig
-
-      - name: Fix kmod-nf-ipt conflicts for Linux 6.12+
-        run: |
-          # Kernel 5.15 here — the script auto-detects the version and
-          # exits without changes; kept for pipeline parity with x86 builds.
-          if [ -f "$GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh" ]; then
-            chmod +x "$GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh"
-            "$GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh"
-            cd ${{ env.TARGET_MATRIX }}
-            make defconfig
-          fi
-
-      - name: Adjust ARM-specific files
-        run: |
-          # 1. build-openclash.sh pre-bundles an amd64 clash_meta core, which
-          #    cannot run on ARM and only wastes NAND space. Drop it — OpenClash
-          #    downloads the correct armv7 core itself on first start.
-          rm -f ${{ env.TARGET_MATRIX }}/package/base-files/files/etc/openclash/core/clash_meta
-          # 2. Point OpenClash core variant at armv7 (32-bit ARM userland),
-          #    otherwise in-app core updates would fetch the amd64 build.
-          sed -i 's/linux-amd64-v1/linux-armv7/g' \
-            ${{ env.TARGET_MATRIX }}/package/base-files/files/usr/lib/wyhome/modules/30-openclash.sh || true
-          echo "[WORKFLOW] ARM adjustments applied (amd64 core removed, core_version=linux-armv7)"
 
       - name: SSH Enabled Debug
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
@@ -191,7 +147,6 @@ jobs:
         id: package
         run: |
           cd ${{ env.TARGET_MATRIX }}
-          cp -f .config $GITHUB_WORKSPACE/diy/common/.config
           make download -j$(($(nproc)+1))
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
@@ -251,9 +206,12 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           touch release.txt
-          echo "OpenWrt CR8806 (Redmi AX3000) Build" >> release.txt
-          echo "Target: ${{ env.RELEASE_NAME }} (ipq50xx/arm, kernel 5.15)" >> release.txt
-          echo "Flash: *-nand-factory.ubi via U-boot TFTP | *-nand-sysupgrade.bin via LuCI" >> release.txt
+          echo "OpenWrt CR8806 AP (official openwrt-25.12) Build" >> release.txt
+          echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, kernel 6.12)" >> release.txt
+          echo "Mode: bridged AP — all ports bridged, DHCP/firewall off, mgmt http://172.16.3.19" >> release.txt
+          echo "WiFi: 2.4G+5G SSID 'WyHouse' (key wyhouse8888), 802.11r/k/v roaming enabled" >> release.txt
+          echo "Perf: irqbalance + packet steering + GRO — gigabit line rate (all ports are 1GbE)" >> release.txt
+          echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP | *-squashfs-sysupgrade.bin via LuCI" >> release.txt
           echo "Date: $(date)" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
