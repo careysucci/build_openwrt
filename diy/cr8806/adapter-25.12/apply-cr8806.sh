@@ -33,6 +33,18 @@ install -Dm755 "$ADAPT_DIR/uboot_env" \
 install -Dm644 "$ADAPT_DIR/mi_dualboot.sh" \
 	target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/mi_dualboot.sh
 
+# Board data files (BDF) for IPQ5018 + QCN6122. Build/Prepare/Default copies
+# ./src/* into the ipq-wifi PKG_BUILD_DIR, where generate-ipq-wifi-package
+# picks them up via wildcard. Without them ipq-wifi-redmi_ax3000 builds EMPTY
+# (wildcard silently matches nothing) and ath11k falls back to generic board
+# data — the QCN6122 5GHz radio then runs with wrong RF parameters.
+# Source: kmiit redmi_ax3000-24.10 ipq-wifi/src; md5-verified identical to
+# the BDF shipped by hzyitc's 21.02 build on the M79 test unit.
+install -Dm644 "$ADAPT_DIR/board-redmi_ax3000.ipq5018" \
+	package/firmware/ipq-wifi/src/board-redmi_ax3000.ipq5018
+install -Dm644 "$ADAPT_DIR/board-redmi_ax3000.qcn6122" \
+	package/firmware/ipq-wifi/src/board-redmi_ax3000.qcn6122
+
 # --- 2. mac80211 patches ------------------------------------------------------
 echo "--- Installing mac80211 patches"
 for p in "$ADAPT_DIR"/patches/*.patch; do

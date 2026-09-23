@@ -121,8 +121,11 @@
 		reg = <0>;
 
 		nand-ecc-engine = <&qpic_nand>;
+		/* strength=8 breaks NAND I/O on qpic-snand, use 4 instead
+		 * (same as upstream iodata,wn-dax3000gr; matches the ECC layout
+		 * written by the stock U-boot flasher) */
+		nand-ecc-strength = <4>;
 		nand-ecc-step-size = <512>;
-		nand-ecc-strength = <8>;
 		nand-bus-width = <8>;
 
 		partitions {

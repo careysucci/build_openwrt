@@ -11,12 +11,19 @@
 #
 # What it does:
 #   1. Bridges ALL ethernet ports (incl. WAN) into br-lan — wired relay
-#   2. Static management IP 172.16.3.19/21 (gw/dns → main router .18)
+#   2. Static management IP 172.16.3.19/24 (gw/dns → main router .18)
 #   3. Disables dnsmasq/odhcpd/firewall — the main router serves these
 #   4. Enables dual-band WiFi, same SSID on both bands:
-#      - 2.4G: HE20, auto channel
-#      - 5G:   HE80, channel 36 (non-DFS → no radar wait, up instantly)
+#      - 2.4G: HE20, channel 1   (on-device measured: quietest band,
+#        noise floor -95 dBm vs -94 on ch6 / -90 on ch11)
+#      - 5G:   HE80, channel 149 (non-DFS, up instantly, 30 dBm class;
+#        on-device scan: only one -86 dBm neighbor near ch161, while
+#        the 36-48 segment already carries 3 APs)
+#      - country US: ath11k firmware is self-managed US on this board;
+#        the BDF caps real output at 23 dBm (2.4G) / 27 dBm (5G) anyway,
+#        while CN regdb would only lower the ceilings (measured)
 #      - 802.11r/k/v fast roaming with a shared mobility domain
+#      - disassoc_low_ack=0: don't kick weak-signal IoT clients
 #   5. System: hostname, timezone, LuCI language
 #
 # Multi-AP roaming: flash every CR8806 with this same firmware and the
@@ -47,7 +54,7 @@ uci -q delete network.wan6
 # Static management address (change to a free IP of your main LAN)
 uci set network.lan.proto='static'
 uci set network.lan.ipaddr='172.16.3.19'
-uci set network.lan.netmask='255.255.248.0'
+uci set network.lan.netmask='255.255.255.0'
 uci set network.lan.gateway='172.16.3.18'
 uci set network.lan.dns='172.16.3.18'
 uci set network.lan.delegate='0'
@@ -84,16 +91,19 @@ if [ -s /etc/config/wireless ]; then
     while uci -q get "wireless.@wifi-device[$r]" >/dev/null 2>&1; do
         band="$(uci -q get "wireless.@wifi-device[$r].band")"
         uci set "wireless.@wifi-device[$r].disabled=0"
-        uci set "wireless.@wifi-device[$r].country=CN"
+        # US regdom (see header): matches the ath11k self-managed domain on
+        # this board; real txpower is BDF-capped at 23/27 dBm regardless.
+        uci set "wireless.@wifi-device[$r].country=US"
         case "$band" in
             2g)
-                uci set "wireless.@wifi-device[$r].channel=auto"
+                # ch1: quietest on-site (noise floor -95 dBm)
+                uci set "wireless.@wifi-device[$r].channel=1"
                 uci set "wireless.@wifi-device[$r].htmode=HE20"
                 ;;
             5g)
-                # ch36 + HE80: non-DFS, usable immediately after boot.
-                # (160MHz is regdb-blocked in CN anyway.)
-                uci set "wireless.@wifi-device[$r].channel=36"
+                # ch149 + HE80: non-DFS, near-empty segment on-site.
+                # (160MHz is unsupported by QCN6122 anyway.)
+                uci set "wireless.@wifi-device[$r].channel=149"
                 uci set "wireless.@wifi-device[$r].htmode=HE80"
                 ;;
         esac
@@ -113,10 +123,13 @@ if [ -s /etc/config/wireless ]; then
         uci set "wireless.@wifi-iface[$i].ft_psk_generate_local=1"
         uci set "wireless.@wifi-iface[$i].ieee80211k=1"
         uci set "wireless.@wifi-iface[$i].ieee80211v=1"
+        # Keep weak-signal IoT clients attached (verified on-device)
+        uci set "wireless.@wifi-iface[$i].disassoc_low_ack=0"
+        uci set "wireless.@wifi-iface[$i].wmm=1"
         i=$((i + 1))
     done
     uci commit wireless
-    echo "[99-ap-bridge] WiFi up: 2.4G(HE20/auto) + 5G(HE80/ch36), SSID=WyHouse, 802.11r/k/v on"
+    echo "[99-ap-bridge] WiFi up: 2.4G(HE20/ch1) + 5G(HE80/ch149), SSID=WyHouse, 802.11r/k/v on"
 else
     echo "[99-ap-bridge] WARNING: /etc/config/wireless missing — configure WiFi via LuCI"
 fi
