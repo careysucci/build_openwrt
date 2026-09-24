@@ -362,6 +362,19 @@
 		/*   reserved: */	0 0>;
 };
 
+/* Board clock frequencies — the dtsi only declares the fixed/factor clocks.
+ * Without these the whole clock chain breaks: watchdog loses its input
+ * clock and cpufreq-dt fails to register (seen on-device, 6.12.108).
+ * Same values as upstream ipq5018-gl-b3000. */
+&sleep_clk {
+	clock-frequency = <32000>;
+};
+
+&xo_board_clk {
+	clock-div = <4>;
+	clock-mult = <1>;
+};
+
 &wifi {
 	// IPQ5018 2.4G
 	status = "okay";

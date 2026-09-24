@@ -94,7 +94,9 @@ patch_file(
     )],
 )
 
-# 3. WiFi calibration data extraction from the "0:ART" partition --------------
+# 3. WiFi calibration data extraction from the "0:art" partition -----------
+# NOTE: lowercase! 6.12 kernels parse Xiaomi's SMEM table to lowercase names
+# (verified on-device: "0:art"); hzyitc 5.4/kmiit 24.10 used "0:ART".
 patch_file(
     "target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata",
     "redmi,ax3000",
@@ -102,14 +104,14 @@ patch_file(
         (
             '"ath11k/IPQ5018/hw1.0/cal-ahb-c000000.wifi.bin")\n\tcase "$board" in\n',
             "\tredmi,ax3000)\n"
-            '\t\tcaldata_extract "0:ART" 0x1000 0x20000\n'
+            '\t\tcaldata_extract "0:art" 0x1000 0x20000\n'
             "\t\t;;\n",
             "after",
         ),
         (
             '"ath11k/QCN6122/hw1.0/cal-ahb-b00a040.wifi.bin")\n\tcase "$board" in\n',
             "\tredmi,ax3000)\n"
-            '\t\tcaldata_extract "0:ART" 0x26800 0x20000\n'
+            '\t\tcaldata_extract "0:art" 0x26800 0x20000\n'
             "\t\t;;\n",
             "after",
         ),
@@ -129,14 +131,14 @@ patch_file(
     )],
 )
 
-# 5. u-boot environment access (0:APPSBLENV, dual-boot flags) -----------------
+# 5. u-boot environment access (0:appsblenv, dual-boot flags) ----------------
 patch_file(
     "package/boot/uboot-tools/uboot-envtools/files/qualcommax_ipq50xx",
     "redmi,ax3000",
     [(
         'case "$board" in\n',
         "redmi,ax3000)\n"
-        '\tubootenv_add_mtd "0:APPSBLENV" "0x0" "0x10000" "0x20000"\n'
+        '\tubootenv_add_mtd "0:appsblenv" "0x0" "0x10000" "0x20000"\n'
         "\t;;\n",
         "after",
     )],
