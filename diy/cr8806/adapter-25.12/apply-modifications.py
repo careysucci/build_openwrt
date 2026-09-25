@@ -64,7 +64,12 @@ define Device/redmi_ax3000
 	SOC := ipq5000
 	NAND_SIZE := 128m
 	DEVICE_DTS_CONFIG := config@mp02.1
-	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-redmi_ax3000
+	# uboot-envtools: hard dependency — the Xiaomi dual-boot upgrade path
+	# (mi_dualboot.sh fw_setenv slot flipping + uboot_env boot flag script)
+	# breaks without fw_printenv/fw_setenv. Force-include it so a seed config
+	# with "# CONFIG_PACKAGE_uboot-envtools is not set" cannot silently
+	# disable OTA slot flipping on this device.
+	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-redmi_ax3000 uboot-envtools
 	# factory.img: same ubinized UBI payload as factory.ubi, .img suffix for
 	# flashing tools that expect it (U-boot TFTP accepts both).
 	IMAGES += factory.img

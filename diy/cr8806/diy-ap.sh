@@ -1,14 +1,15 @@
 #!/bin/bash
 #
 # File name: diy/cr8806/diy-ap.sh
-# Description: Build-time customization for the CR8806 ImmortalWrt AP build
+# Description: Build-time customization for the CR8806 ImmortalWrt router build
 #
 # Standalone script — the shared diy-part1.sh / diy-part2.sh are NOT
 # touched, so LEDE and official builds keep working exactly as before.
 #
 # What it does:
 #   1. Brand the banner / openwrt_release / os-release
-#   2. Install 99-ap-bridge (first-boot bridged-AP provisioning)
+#   2. Install 99-ap-bridge (first-boot branding + WiFi provisioning;
+#      network/DHCP/firewall/WAN stay stock router defaults)
 #   3. Install netopt.sh (boot-time tuning: CPU governor, GRO, bridge-nf)
 #
 # Requires env: TARGET_MATRIX, AUTHORED_BY, RELEASE_NAME, DATE4
@@ -59,15 +60,16 @@ if [ -f "diy/cr8806/99-ap-bridge" ]; then
     cp -f diy/cr8806/99-ap-bridge \
         "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge"
     chmod +x "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge"
-    echo "[DIY-AP] 99-ap-bridge installed (bridged AP + WiFi roaming at first boot)"
+    echo "[DIY-AP] 99-ap-bridge installed (stock router defaults + WiFi roaming at first boot)"
 else
     echo "[ERROR] diy/cr8806/99-ap-bridge not found"
     exit 1
 fi
 
 # ===== Install network optimization (boot-time, exits after tuning) =====
-# Benefits for an AP: CPU governor=performance, GRO on ethernet ports,
-# bridge-nf-call disabled (bridged frames skip netfilter → less CPU).
+# Benefits: CPU governor=performance, GRO on ethernet ports, bridge-nf
+# calls disabled (intra-LAN bridged frames skip netfilter → less CPU;
+# routed WAN traffic still filtered by firewall4 as usual).
 if [ -f "diy/common/netopt.sh" ] && [ -d "$TARGET_DIR/package/base-files/files/etc/init.d" ]; then
     cp -f diy/common/netopt.sh "$TARGET_DIR/package/base-files/files/etc/init.d/netopt"
     chmod +x "$TARGET_DIR/package/base-files/files/etc/init.d/netopt"

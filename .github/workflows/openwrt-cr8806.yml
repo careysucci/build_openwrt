@@ -1,7 +1,7 @@
 #
 #
 # File: .github/workflows/openwrt-cr8806.yml
-# Description: Build official OpenWrt (openwrt-25.12) AP firmware for Xiaomi CR8806 / Redmi AX3000
+# Description: Build official OpenWrt (openwrt-25.12) router firmware for Xiaomi CR8806 / Redmi AX3000
 #
 # Target:  qualcommax/ipq50xx (Qualcomm IPQ5018, aarch64, kernel 6.12)
 # Source:  official openwrt/openwrt @ openwrt-25.12, with the CR880x
@@ -10,8 +10,9 @@
 #          kmiit/Redmi_AX3000_immortalwrt adaptation, most of which is already
 #          upstream in 25.12: QCN6122, RSSI fix, MPD, ge_phy, caldata helpers).
 #          Full ath11k stack: 2.4G (IPQ5018) + 5G (QCN6122) both work.
-# Profile: pure bridged AP — no proxy/NAS apps; first boot applies
-#          bridge + dual-band WiFi (802.11r/k/v) via diy/cr8806/99-ap-bridge.
+# Profile: standard router — DHCP/firewall/WAN stock (PPPoE-ready), no
+#          proxy/NAS apps; first boot brands the box and provisions
+#          dual-band WiFi (802.11r/k/v) via diy/cr8806/99-ap-bridge.
 # Perf:    irqbalance (package) + packet_steering + GRO (99-ap-bridge/netopt)
 #          tuned for gigabit line rate — note all ports are 1GbE.
 #
@@ -125,8 +126,9 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          # AP build: standalone diy script (banner/branding/first-boot AP
-          # provisioning). No third-party feeds — plain OpenWrt feeds only.
+          # Standalone diy script (banner/branding/first-boot WiFi
+          # provisioning; router defaults untouched). No third-party
+          # feeds — plain OpenWrt feeds only.
           chmod +x ./$DIY_AP_SH && ./$DIY_AP_SH
           cd ${{ env.TARGET_MATRIX }}
           # Inject CR8806 device support into the official 25.12 tree

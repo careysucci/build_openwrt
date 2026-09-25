@@ -1,19 +1,40 @@
 #!/bin/sh
 # =============================================================
 # uci-defaults: 99-ap-bridge
-# Target: Xiaomi CR8806 / Redmi AX3000 — ImmortalWrt 25.12 AP build
+# Target: Xiaomi CR8806 / Redmi AX3000 — ImmortalWrt 25.12 router build
 #
-# Runs once at first boot. Timing is safe: /etc/init.d/boot executes
-#   config_generate  → /etc/config/network exists
-#   wifi config      → /etc/config/wireless exists (radio0/radio1)
-#   uci_apply_defaults → THIS script
-# The script deletes itself after a successful run (exit 0).
+# [Filename kept for continuity] This script NO LONGER configures
+# bridged-AP mode: the image boots as a STANDARD ROUTER — stock LAN
+# 192.168.1.1/24, DHCP server, firewall and routed WAN (DHCP client or
+# PPPoE, both work out of the box). It only brands the box and
+# provisions the WiFi below. Converting to a bridged AP is a manual
+# on-device step (recipe in this header, just below).
 #
-# What it does:
-#   1. Bridges ALL ethernet ports (incl. WAN) into br-lan — wired relay
-#   2. Static management IP 172.16.3.19/24 (gw/dns → main router .18)
-#   3. Disables dnsmasq/odhcpd/firewall — the main router serves these
-#   4. Enables dual-band WiFi, same SSID on both bands:
+# Manual bridge-AP conversion (do it ONLY when you actually want it):
+#   1. LuCI → Network → Interfaces → Devices → br-lan → add port 'wan'
+#   2. LuCI → Network → Interfaces → delete wan & wan6; edit lan →
+#      static address of the MAIN LAN (IP / mask / gateway / DNS)
+#   3. LuCI → Network → DHCP/DNS → disable DHCP on lan
+#   4. LuCI → System → Startup → disable firewall + dnsmasq
+#   (equivalent uci: add 'wan' to the br-lan device ports; delete
+#    network.wan / network.wan6; network.lan proto=static + ipaddr/
+#    netmask/gateway/dns; dhcp.lan.ignore=1; disable both services)
+#
+# Runs once at first boot, from uci_apply_defaults inside
+# /etc/init.d/boot (START=10) — i.e. after kmodloader and BEFORE netifd
+# starts. config_generate ran during preinit, so /etc/config/network and
+# /etc/config/system exist by then. /etc/config/wireless does NOT: it is
+# created by the ieee80211 hotplug once the ath11k phys register, which
+# on this board happens AFTER uci_apply_defaults starts (kmodloader
+# finishes ~18s, ath11k probes complete ~19s). The WiFi section below
+# therefore WAITS for the radios — see its comment.
+# The script deletes itself after a successful run (exit 0); on WiFi
+# timeout it exits 1 so it is retried on the next boot.
+#
+# What it does (everything else stays STOCK router defaults):
+#   1. System: hostname, timezone, LuCI language
+#   2. packet_steering=1: RX softirqs spread over both A53 cores
+#   3. Enables dual-band WiFi, same SSID on both bands:
 #      - 2.4G: HE20, channel 1   (on-device measured: quietest band,
 #        noise floor -95 dBm vs -94 on ch6 / -90 on ch11)
 #      - 5G:   HE80, channel 149 (non-DFS, up instantly, 30 dBm class;
@@ -24,57 +45,28 @@
 #        while CN regdb would only lower the ceilings (measured)
 #      - 802.11r/k/v fast roaming with a shared mobility domain
 #      - disassoc_low_ack=0: don't kick weak-signal IoT clients
-#   5. System: hostname, timezone, LuCI language
 #
-# Multi-AP roaming: flash every CR8806 with this same firmware and the
-# SSID/password/mobility-domain match automatically — clients roam
-# seamlessly over Ethernet backhaul. For wireless mesh instead, add an
-# 802.11s interface in LuCI (wpad-openssl already supports SAE mesh).
+# Multi-AP roaming (valid once the boxes are converted to bridge mode):
+# flashing every CR8806 with this same firmware gives them identical
+# SSID/password/mobility-domain — clients roam seamlessly over the
+# Ethernet backhaul. For wireless mesh instead, add an 802.11s interface
+# in LuCI (wpad-openssl already supports SAE mesh).
 # =============================================================
 
-echo "[99-ap-bridge] configuring bridged-AP mode..."
+echo "[99-ap-bridge] provisioning router-mode branding + WiFi..."
 
-# ---- 1. Network: bridge the WAN port into br-lan --------------------
-# DSA layout on CR8806: br-lan over lan1/lan2, wan as standalone port.
-# Add 'wan' to the bridge so every port serves the LAN (wired relay).
-idx=0
-while uci -q get "network.@device[$idx]" >/dev/null 2>&1; do
-    if [ "$(uci -q get "network.@device[$idx].name")" = "br-lan" ]; then
-        uci -q del_list "network.@device[$idx].ports=wan" 2>/dev/null
-        uci -q add_list "network.@device[$idx].ports=wan"
-        echo "[99-ap-bridge] WAN port bridged into br-lan"
-    fi
-    idx=$((idx + 1))
-done
-
-# Remove routed WAN interfaces — an AP does not route
-uci -q delete network.wan
-uci -q delete network.wan6
-
-# Static management address (change to a free IP of your main LAN)
-uci set network.lan.proto='static'
-uci set network.lan.ipaddr='172.16.3.19'
-uci set network.lan.netmask='255.255.255.0'
-uci set network.lan.gateway='172.16.3.18'
-uci set network.lan.dns='172.16.3.18'
-uci set network.lan.delegate='0'
-uci -q delete network.lan.ip6assign
-
-# Packet steering: spread RX softirq load across both A53 cores, so a single
-# core cannot bottleneck WiFi<->wired bridging at gigabit line rate.
+# ---- 1. Network: stock router defaults + packet steering -------------
+# LAN address, DHCP server, firewall and the routed WAN interface stay
+# EXACTLY as generated (LAN 192.168.1.1/24, WAN as DHCP client — switch
+# to PPPoE in LuCI if the broadband line requires it). Nothing deleted,
+# nothing bridged: the box is a normal router out of the box.
+# Packet steering: spread RX softirq load across both A53 cores, so a
+# single core cannot bottleneck WiFi<->wired forwarding at line rate.
 # (netifd >= 22.03 honors network.globals.packet_steering → RPS on all ifaces)
 uci set network.globals.packet_steering='1'
 uci commit network
 
-# ---- 2. Disable DHCP/DNS/firewall (main router's job) ---------------
-uci set dhcp.lan.ignore='1'
-uci commit dhcp
-/etc/init.d/dnsmasq disable 2>/dev/null || true
-/etc/init.d/odhcpd disable 2>/dev/null || true
-/etc/init.d/firewall disable 2>/dev/null || true
-echo "[99-ap-bridge] dnsmasq/odhcpd/firewall disabled"
-
-# ---- 3. System ------------------------------------------------------
+# ---- 2. System ------------------------------------------------------
 uci set system.@system[0].hostname='WyHouse-AP'
 uci set system.@system[0].timezone='CST-8'
 uci set system.@system[0].zonename='Asia/Shanghai'
@@ -83,9 +75,24 @@ uci commit system
 uci set luci.main.lang='zh_Hans'
 uci commit luci
 
-# ---- 4. WiFi: dual-band, one SSID, fast roaming ---------------------
-# /etc/config/wireless is generated by `wifi config` before uci-defaults.
-if [ -s /etc/config/wireless ]; then
+# ---- 3. WiFi: dual-band, one SSID, fast roaming ---------------------
+# Wait for the ieee80211 hotplug to create /etc/config/wireless when the
+# ath11k phys register — on this board they appear ~1s after this script
+# starts (the two probes land ~0.3s apart, so wait for BOTH radios, not
+# just for the file to exist; max 60s). netifd starts after boot()
+# returns (START=20 vs 10) and reads the committed config, so no
+# explicit `wifi reload` is needed here.
+count_radios() {
+    uci -q show wireless 2>/dev/null | grep -c '=wifi-device'
+}
+
+n=0
+while [ "$(count_radios)" -lt 2 ] && [ "$n" -lt 60 ]; do
+    sleep 1
+    n=$((n + 1))
+done
+
+if [ "$(count_radios)" -ge 1 ]; then
     # Radio-level settings, keyed by band (robust to radio naming)
     r=0
     while uci -q get "wireless.@wifi-device[$r]" >/dev/null 2>&1; do
@@ -131,8 +138,10 @@ if [ -s /etc/config/wireless ]; then
     uci commit wireless
     echo "[99-ap-bridge] WiFi up: 2.4G(HE20/ch1) + 5G(HE80/ch149), SSID=WyHouse, 802.11r/k/v on"
 else
-    echo "[99-ap-bridge] WARNING: /etc/config/wireless missing — configure WiFi via LuCI"
+    echo "[99-ap-bridge] WARNING: no wifi-device in /etc/config/wireless after 60s"
+    echo "[99-ap-bridge] WiFi NOT provisioned — exiting 1 to retry on next boot"
+    exit 1
 fi
 
-echo "[99-ap-bridge] done. LuCI: http://172.16.3.19 (root, no password)"
+echo "[99-ap-bridge] done. Router defaults kept. LuCI: http://192.168.1.1 (root, no password)"
 exit 0
