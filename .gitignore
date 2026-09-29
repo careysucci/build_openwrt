@@ -19,3 +19,12 @@ bin-release/
 /.idea/modules.xml
 /.idea/misc.xml
 /.idea/build_openwrt.iml
+
+# Workspace-local scratch (never part of the build):
+#   _pvenv/       - paramiko venv for on-device SSH verification
+#   _iperf_win/   - Windows iperf3 client for throughput tests
+#   _art_*.bin    - ART dumps of the reference units (172.16.3.19 M79,
+#                   172.16.0.248 M81), input data of the per-unit BDF work
+#   _nss_tree/    - NSS build tree clones (openwrt-nss-edma etc.)
+/_*
+/.idea/
