@@ -1,6 +1,17 @@
 #!/bin/sh /etc/rc.common
 # Redmi AX3000 / CR880X: confirm successful boot to the bootloader
 # (dual partition scheme: rootfs / rootfs_1 with ota flags).
+#
+# CR8806 vendor U-Boot (measured on-device 2026-09-29): flag_boot_rootfs
+# selects the boot partition and the bootloader pre-arms the
+# flag_try_sysN_failed flag of the slot it is about to boot (anti-brick
+# rollback). Every successful boot therefore re-confirms itself:
+# clear the pre-armed failed flag, pin flag_boot_rootfs /
+# flag_last_success to the running slot and mark the boot healthy.
+# This replaces the upstream "only act when flag_ota_reboot=1" logic —
+# this U-Boot build never consumes flag_ota_reboot, so the old script
+# never fired and a stale pre-armed failed flag would roll the box back
+# to the other slot on the next reboot.
 
 START=99
 
@@ -11,26 +22,25 @@ boot() {
 	redmi,ax3000)
 		fw_printenv >/dev/null || return 0
 
-		local flag_ota_reboot="$(fw_printenv flag_ota_reboot | cut -d'=' -f2)"
-		if [ "$flag_ota_reboot" = 1 ]; then
-			local mtd="$(grep -oE 'ubi.mtd=[a-zA-Z0-9\-\_]*' /proc/cmdline | cut -d'=' -f2)"
-			case $mtd in
-			rootfs)
-				fw_setenv flag_last_success 0
-				fw_setenv flag_ota_reboot 0
-				fw_setenv flag_boot_success 1
-				;;
-			rootfs_1)
-				fw_setenv flag_last_success 1
-				fw_setenv flag_ota_reboot 0
-				fw_setenv flag_boot_success 1
-				;;
-			*)
-				echo "Unable to determine UBIPART: ubi.mtd=$mtd"
-				return 1
-				;;
-			esac
-		fi
+		local mtd="$(grep -oE 'ubi.mtd=[a-zA-Z0-9\-\_]*' /proc/cmdline | cut -d'=' -f2)"
+		case $mtd in
+		rootfs)
+			fw_setenv flag_try_sys1_failed 0
+			fw_setenv flag_last_success 0
+			fw_setenv flag_boot_rootfs 0
+			;;
+		rootfs_1)
+			fw_setenv flag_try_sys2_failed 0
+			fw_setenv flag_last_success 1
+			fw_setenv flag_boot_rootfs 1
+			;;
+		*)
+			echo "Unable to determine UBIPART: ubi.mtd=$mtd"
+			return 1
+			;;
+		esac
+		fw_setenv flag_ota_reboot 0
+		fw_setenv flag_boot_success 1
 		;;
 	esac
 }

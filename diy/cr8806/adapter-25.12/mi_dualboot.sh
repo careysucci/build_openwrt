@@ -70,11 +70,21 @@ mi_dualboot_do_upgrade() {
 	# Tell u-boot that the current is able to boot.
 	fw_setenv flag_last_success ${current} || return 1
 
-	# Tell u-boot to try to boot the other system.
-	# If it failed, it will clean this flag.
-	fw_setenv flag_ota_reboot 1 || return 1
-
-	# When this flag is set to 0 and the `flag_ota_reboot` is 1,
-	# the u-boot will roll back to `flag_last_success`.
-	fw_setenv flag_boot_success || return 1
+	# CR8806 vendor U-Boot (measured on-device 2026-09-29, cross-checked
+	# with the CB0401 serial logs of cmd_bootmiwifi.c on the OpenWrt
+	# forum): the boot partition is selected by flag_boot_rootfs, and
+	# flag_boot_success must stay 1 — with it cleared (or 0) the
+	# bootloader takes the conservative path and boots flag_last_success,
+	# i.e. the OLD system, ignoring the upgrade entirely. The upstream
+	# hzyitc flag dance (ota_reboot=1 + delete boot_success) therefore
+	# leaves this box on the old slot after sysupgrade: the flash succeeds
+	# but the new firmware never boots. Point the selector straight at the
+	# newly written slot and keep the healthy-boot state instead. The
+	# anti-brick rollback still works: before booting the target slot
+	# U-Boot pre-arms its try_sysN_failed flag, and either the new
+	# system's uboot_env init script re-confirms the boot or the
+	# bootloader falls back to flag_last_success (the old slot).
+	fw_setenv flag_boot_rootfs $((1 - current)) || return 1
+	fw_setenv flag_boot_success 1 || return 1
+	fw_setenv flag_ota_reboot 0 || return 1
 }
