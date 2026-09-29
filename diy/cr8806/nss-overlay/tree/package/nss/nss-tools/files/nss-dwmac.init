@@ -1,0 +1,306 @@
+#!/bin/sh /etc/rc.common
+# START and USE_PROCD are read by /etc/rc.common, not by this file.
+# shellcheck disable=SC2034
+# NSS offload bring-up for ipq50xx (qca-dwmac-nss glue), split around netifd.
+#
+# The ipq50xx port model is the reverse of ipq807x: phys_if N is GMAC N and
+# the netdev is the switch trunk, so the DSA switch cannot keep its ports on
+# the data plane - the firmware cannot parse the 2-byte Atheros DSA tag, and
+# DSA user ports never get an NSS interface number, so ECM would not even
+# try to accelerate them. Port separation is done in the switch fabric
+# instead: qca8k is unbound after it has done the hard bring-up (SerDes,
+# clocks, uniphy) and the qca8337-nss module reprograms the fabric - MACs
+# on, Atheros header off, and the VTU split from nss.general.vtu (front
+# ports untagged in their VLANs, the CPU port carrying both tagged). The
+# trunk then carries plain 802.1q, which both the firmware (dynamic
+# interface type 17) and the host stack parse natively.
+#
+# The topology is therefore FIXED for both data paths: eth0 is the trunk,
+# netifd builds eth0.<vid> VLAN subinterfaces on it (lan bridge and wan),
+# and nss.general.enabled only decides what runs underneath - the NSS
+# firmware data plane with ECM acceleration, or the plain stmmac host path.
+# A failed firmware arm degrades to the host path with the same topology.
+#
+# Wi-Fi offload is on by default (nss.general.wifi_offload='1', set on
+# first boot by nss-dwmac.defaults): ath11k is left to nss-dwmac-up and
+# loads after the arm. '0' keeps Wi-Fi on the host path; wired NSS
+# acceleration is the same either way.
+
+START=19
+USE_PROCD=1
+
+NSSOFF=/sys/module/ath11k/parameters/nss_offload
+FWM=/sys/kernel/debug/qca-dwmac-nss/fw_mask
+GLUE_STATUS=/sys/kernel/debug/qca-dwmac-nss/status
+
+wifi_load() {
+	local offload="$1"
+
+	modprobe ath11k 2>/dev/null
+	[ -w $NSSOFF ] && echo "$offload" > $NSSOFF
+	# No pbuf tuning here: the NSS core is not up at this point in boot, so
+	# the driver refuses the sysctl with -EAGAIN (feed patch 0142) and the
+	# pools would silently stay at their defaults. nss-dwmac-up sizes them
+	# after the arm, on every path.
+	modprobe ath11k_ahb 2>/dev/null
+	modprobe ath11k_pci 2>/dev/null
+}
+
+# qca8k did the SerDes/uniphy bring-up at boot; take the switch away from
+# it and re-arm the fabric for the VLAN trunk. Safe to call when already
+# unbound (a service restart): a successfully loaded helper is left in place.
+#
+# Board wiring comes from uci (all optional; defaults = GL-B3000):
+#   nss.general.switch_dev   the switch's mdio device, to unbind from qca8k
+#                            (default 90000.mdio-1:11 - QCA8337 at address 17
+#                            on mdio1, the usual placement)
+#   nss.general.vtu          VTU program (module parameter 'vlans')
+#   nss.general.switch_args  any further qca8337-nss parameters, verbatim,
+#                            e.g. 'cpu_port=6 ports=0x7c wake_phys=...'
+#                            for a board with the CPU port on port 6
+. /lib/functions.sh
+
+switch_to_trunk() {
+	local dev vtu args fabric
+
+	# A board with no switch at all (Linksys MX6200: GMAC0 is the LAN PHY,
+	# GMAC1 the WAN PHY) has nothing to re-arm; qca8337-nss loaded there
+	# would poke the B3000's switch registers at an MDIO address that
+	# answers with whatever sits at it.
+	fabric="$(uci -q get nss.general.fabric)"
+	[ -n "$fabric" ] || fabric=qca8337
+	if [ "$fabric" = "none" ]; then
+		logger -t nss "no switch fabric on this board (nss.general.fabric=none), trunk is a plain PHY port"
+		return 0
+	fi
+	[ ! -d /sys/module/qca8337_nss ] || return 0
+
+	dev="$(uci -q get nss.general.switch_dev)"
+	[ -n "$dev" ] || dev="90000.mdio-1:11"
+	vtu="$(uci -q get nss.general.vtu)"
+	# The built-in VTU program is the GL-B3000's wiring. It used to be the
+	# fallback for every board, which split a LAN-only switch (Xunison D50)
+	# into two VLANs nobody had asked for. Empty vtu now means VTU off.
+	[ -n "$vtu" ] || [ "$(board_name)" != "glinet,gl-b3000" ] || vtu="1:0t,2u,3u;2:0t,1u"
+	args="$(uci -q get nss.general.switch_args)"
+
+	if [ -e "/sys/bus/mdio_bus/drivers/qca8k/$dev" ]; then
+		echo "$dev" > /sys/bus/mdio_bus/drivers/qca8k/unbind || return 1
+		sleep 2
+	fi
+	# kmodloader's modprobe drops module parameters - insmod passes them.
+	# shellcheck disable=SC2086
+	if [ -n "$vtu" ]; then
+		insmod "/lib/modules/$(uname -r)/qca8337-nss.ko" vlans="$vtu" $args || return 1
+	else
+		insmod "/lib/modules/$(uname -r)/qca8337-nss.ko" $args || return 1
+	fi
+}
+
+# C-3PO: keep the DSA switch driver and its ports, and have the switch talk
+# to the CPU in plain 802.1Q instead of the switch's own header. The kernel's
+# tag_8021q taggers do that (qca-8021q for qca8k, rtl8365mb-8021q for
+# rtl8365mb: a standalone port carries VID 3072+N, a bridge's ports share
+# one VID); the firmware parses 802.1Q natively, and
+# qca-dsa-nss (loaded by nss-dwmac-up after the arm) gives every port and
+# bridge a firmware VLAN interface so ECM can write rules for them. The
+# tag protocol can only be switched while the conduit and every user port
+# are down, which is the case here: the service runs before netifd.
+#
+# Nothing here is configured: the conduit is the netdev DSA hangs the user
+# ports off (nss_dsa_conduit), and a board with no switch at all has
+# nothing to switch. nss.general.trunk still overrides the conduit.
+switch_to_8021q() {
+	local trunk tagging cur want other stray port up
+
+	trunk="$(uci -q get nss.general.trunk)"
+	if [ -z "$trunk" ]; then
+		nss_dsa_conduit
+		trunk="$NSS_CONDUIT"
+	fi
+	if [ -z "$trunk" ]; then
+		logger -t nss "topology dsa: no DSA switch on this board - the GMACs go to the firmware as they are"
+		return 0
+	fi
+	# Ports left on another CPU link are invisible to the firmware:
+	# qca-dsa-nss hangs its VLAN interfaces off this conduit's interface
+	# number alone. The first-boot defaults put every port on one link, so
+	# this is about a board table that splits them (the AX5400 and the
+	# PZ-L8 do) on a config that predates that, or an admin's own split.
+	for other in /sys/class/net/*; do
+		[ -d "$other/dsa" ] || continue
+		other="${other##*/}"
+		[ "$other" != "$trunk" ] || continue
+		stray=''
+		for up in "/sys/class/net/$other"/upper_*; do
+			[ -e "$up" ] || continue
+			port="${up##*/upper_}"
+			[ -n "$(cat "/sys/class/net/$port/phys_switch_id" 2>/dev/null)" ] || continue
+			stray="$stray $port"
+		done
+		[ -n "$stray" ] && logger -t nss "topology dsa:$stray on conduit $other, not $trunk - those ports stay on the host path (a 'config device' section with option name <port> and option conduit $trunk moves one; board.d's split is in /etc/board.json, not in /etc/config/network)"
+	done
+	tagging="/sys/class/net/$trunk/dsa/tagging"
+	cur="$(cat "$tagging" 2>/dev/null)"
+	if [ -z "$cur" ]; then
+		logger -t nss "topology dsa: $trunk is not a DSA conduit, nothing to switch"
+		return 1
+	fi
+	want="$(nss_dsa_tagger "$trunk")" || {
+		logger -t nss "topology dsa: no tag_8021q tagger for the switch behind $trunk (driver $want) - the firmware will not parse this traffic"
+		return 1
+	}
+	[ "$cur" = "$want" ] && return 0
+	# The kernel refuses the switch while the conduit or any user port is
+	# up. netifd has not run yet, but preinit brings the lan ports up for
+	# the failsafe window and can leave them admin-up (measured: lan1 up
+	# at 6 s, the write at 11 s fails). The user ports are the conduit's
+	# uppers in sysfs; take them and the conduit down first - netifd
+	# configures them from scratch a moment later anyway.
+	for up in "/sys/class/net/$trunk"/upper_*; do
+		[ -e "$up" ] || continue
+		ip link set "${up##*/upper_}" down 2>/dev/null
+	done
+	ip link set "$trunk" down 2>/dev/null
+	if echo "$want" > "$tagging" 2>/dev/null; then
+		logger -t nss "topology dsa: $trunk tagger $cur -> $want"
+		return 0
+	fi
+	logger -t nss "topology dsa: could not switch $trunk tagger from $cur to $want (ports up? kernel without the $want tag driver?) - the firmware will not parse this traffic"
+	return 1
+}
+
+start_service() {
+	local mask wifi_offload topology
+
+	. /lib/nss/functions.sh
+
+	topology="$(uci -q get nss.general.topology)"
+	if [ "$topology" = "dsa" ]; then
+		switch_to_8021q
+	elif ! switch_to_trunk; then
+		logger -p user.err -t nss "switch setup failed; refusing NSS takeover"
+		wifi_load 0
+		return 1
+	fi
+
+	wifi_offload="$(uci -q get nss.general.wifi_offload)"
+	[ "$wifi_offload" = "1" ] || wifi_offload=0
+
+	if [ "$(uci -q get nss.general.enabled)" = "0" ]; then
+		logger -t nss "NSS bring-up disabled via uci (nss.general.enabled=0), staying on the host stack"
+		wifi_load 0
+		return 0
+	fi
+
+	# Load the glue and the core driver now, arm later: qca-nss-drv's
+	# probe defers until a port is armed, so loading it here is inert.
+	# The ARMING is done by nss-dwmac-up on a LIVE trunk - arming a down
+	# eth0 at this point in boot brings the firmware up, but its GMAC
+	# then never delivers a single ingress frame (E124/E125). Do NOT
+	# load qca-nss-vlan here either: vlan-mgr resolves the trunk's NSS
+	# interface number when it sees a VLAN netdev register, and that
+	# number only exists once the takeover has run - loaded before the
+	# arm, the registration fails silently and the firmware drops all
+	# tagged ingress (E126). nss-dwmac-up loads it after the arm; the
+	# netdevice notifier replays NETDEV_REGISTER for every netdev that
+	# already exists, so netifd's eth0.<vid> are picked up regardless of
+	# who came first.
+	# Which netdev backs which NSS phys_if (= GMAC index). The trunk is
+	# whatever netdev the switch-side GMAC got: eth0 on boards where GMAC0
+	# is unused (GL-B3000, Linksys MX/MR), eth1 where GMAC0 is the WAN PHY
+	# (Xunison D50), eth0 again where the switch hangs off GMAC0 (SPNMX56,
+	# AX5400 port 5). nss.general.trunk names it, nss.general.trunk_if says
+	# which GMAC that is (default 1). A second GMAC in use - the D50's and
+	# MX6200's WAN PHY on GMAC0, the SPNMX56's 2.5G PHY on GMAC1 - goes in
+	# nss.general.extra_ports as '<if>:<netdev>' entries; fw_mask decides
+	# which of them the firmware actually gets.
+	# The glue must get the map as a parameter (kmodloader's modprobe drops
+	# them), so insmod; and through debugfs as well, because the insmod is a
+	# no-op when the module is already loaded - and it often is: qca-nss-drv
+	# pulls the glue in as a symbol dependency, so kmodloader can get there
+	# first and the parameter is then lost without a word.
+	local trunk trunk_if extra ifmap
+	trunk="$(uci -q get nss.general.trunk)"
+	trunk_if="$(uci -q get nss.general.trunk_if)"
+	extra="$(uci -q get nss.general.extra_ports | tr ' ' ',')"
+	if [ "$topology" = "dsa" ] && [ -z "$trunk$trunk_if$extra" ]; then
+		# C-3PO: every GMAC that has a netdev, by the node it sits on.
+		# Which of them the firmware gets is nss-dwmac-up's call, once
+		# netifd has said which ones are in use (nss_dsa_fw_mask).
+		ifmap="$(nss_gmac_netdevs | tr '\n' ',')"
+		ifmap="${ifmap%,}"
+		logger -t nss "topology dsa: GMAC map read off the board: $ifmap"
+	else
+		[ -n "$trunk" ] || trunk=eth0
+		[ -n "$trunk_if" ] || trunk_if=1
+		ifmap="$trunk_if:$trunk${extra:+,$extra}"
+	fi
+	insmod "/lib/modules/$(uname -r)/qca-dwmac-nss.ko" ifmap="$ifmap" 2>/dev/null ||
+		modprobe qca-dwmac-nss 2>/dev/null
+	[ -w /sys/kernel/debug/qca-dwmac-nss/ifmap ] &&
+		echo "$ifmap" > /sys/kernel/debug/qca-dwmac-nss/ifmap
+	modprobe qca-nss-drv 2>/dev/null
+
+	# GMAC descriptor rings: where the firmware keeps each GMAC's DMA rings.
+	# qca-nss-drv reads meminfo_user_config when the core boots, which is
+	# deferred until a port is armed, so writing it here is in time. By
+	# default GMAC1's rings go to UTCM_SHARED: fine on the GL-B3000 and the
+	# AX55, but on the Redmi AX5400, the MR5500 and the AX6000 the port
+	# never starts its DMA (rs=0 ts=0, rx_fw=0) until they are in SDRAM
+	# (PR #1; MR5500 and AX6000 confirmed in forum #331-#336).
+	# nss.general.meminfo sets the value on any board, and 'default' keeps
+	# the firmware's placement on these three. An override already in the
+	# parameter is kept.
+	local memcfg want
+	want="$(uci -q get nss.general.meminfo)" || want=''
+	case "$want" in
+	default)
+		want=''
+		;;
+	'')
+		case "$(board_name)" in
+		linksys,mr5500|xiaomi,ax6000|xiaomi,redmi-ax5400)
+			want='<0, gmac_tx_desc_1, SDRAM>, <0, gmac_rx_desc_1, SDRAM>'
+			;;
+		esac
+		;;
+	esac
+	if [ -n "$want" ]; then
+		memcfg="$(cat /sys/module/qca_nss_drv/parameters/meminfo_user_config)" || { wifi_load 0; return 1; }
+		[ -n "$memcfg" ] ||
+			printf '%s\n' "$want" > /sys/module/qca_nss_drv/parameters/meminfo_user_config || { wifi_load 0; return 1; }
+		logger -t nss "GMAC descriptor rings: meminfo_user_config=${memcfg:-$want}"
+	fi
+
+	# Wi-Fi offload has to wait for the firmware, host Wi-Fi does not.
+	# ath11k registers the wifili interface at module load and checks the
+	# NSS core state right there: nss_cmn_get_state() != INITIALIZED makes
+	# ath11k_nss_setup() fail with -EINVAL ("nss state in default init
+	# state"), the radio falls back to the host path for the rest of the
+	# boot, and nothing retries. The core is only booted by the arm in
+	# nss-dwmac-up, which runs after netifd - about 14 s later - so loading
+	# ath11k here with nss_offload=1 loses that race every time. It is the
+	# same class of failure as the other three orderings above, with the
+	# same silent symptom: everything looks up, the diag line even says
+	# "Wi-Fi on the NSS path", and the offload is simply not there.
+	# On multipd IPQ5018 a later reload is not an option - rmmod ath11k_ahb
+	# does not clean up the Q6 and the radios never come back - so this is
+	# load-once-in-the-right-place, not load-and-retry.
+	if [ "$wifi_offload" = "1" ]; then
+		logger -t nss "Wi-Fi offload requested: deferring ath11k to nss-dwmac-up (after the arm)"
+	else
+		wifi_load 0
+	fi
+
+	procd_open_instance nss-up
+	procd_set_param command /usr/sbin/nss-dwmac-up
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+stop_service() {
+	echo "The NSS plane cannot be detached at runtime; reboot to return to the host stack."
+	echo "To keep it off across reboots: uci set nss.general.enabled='0'; uci commit nss"
+}

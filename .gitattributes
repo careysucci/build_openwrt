@@ -1,0 +1,5 @@
+# Byte-exact vendored files: the NSS overlay tree/ reproduces upstream git
+# blobs, and at least one of them (netifd 0001 patch) carries CRLF inside the
+# blob itself. Any eol conversion (core.autocrlf on Windows) silently breaks
+# the byte fidelity that apply-nss-overlay.sh verifies — keep these raw.
+diy/cr8806/nss-overlay/tree/** -text

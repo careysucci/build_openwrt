@@ -2,15 +2,21 @@
 #
 #
 # File: .github/workflows/openwrt-cr8806-nss.yml
-# Description: Build the kuncy7 NSS-enabled firmware for Xiaomi CR8806 / Redmi AX3000
+# Description: Build the NSS-enabled firmware for Xiaomi CR8806 / Redmi AX3000
 #
 # Target:  qualcommax/ipq50xx (Qualcomm IPQ5018, aarch64, kernel 6.18)
-# Source:  kuncy7/openwrt-nss-edma @ c3po-tag-8021q — upstream
-#          stmmac/dwmac-ipq5018 MACs + qca8k DSA switch + NSS PPE
-#          hardware acceleration (nss-tools-dwmac runtime, ECM,
+# Source:  official openwrt/openwrt main @ 3ab520425b1 (pinned tarball)
+#          + the vendored NSS increment of kuncy7/openwrt-nss-edma
+#          c3po-tag-8021q @ 2f00ddefdba, applied by
+#          diy/cr8806/nss-overlay/apply-nss-overlay.sh (every byte
+#          sha256-verified against the pinned base and the branch blobs):
+#          upstream stmmac/dwmac-ipq5018 MACs + qca8k DSA switch + NSS
+#          PPE hardware acceleration (nss-tools-dwmac runtime, ECM,
 #          ath11k Wi-Fi offload), with CR8806 device support injected
 #          by diy/cr8806/adapter-nss (board DTS, per-unit BDF
 #          generators for both radios, Xiaomi dual-boot sysupgrade).
+#          The nss feed (qca-nss-drv / qca-nss-ecm / nss-firmware 12.2)
+#          is pinned by commit in NSS_FEED_PIN and verified at build time.
 #          The NSS data path is hardware-accelerated in the NSS
 #          firmware: WAN<->LAN routing (ECM), bridge forwarding and
 #          both Wi-Fi radios run off-CPU. Same switch wiring as the
@@ -36,7 +42,7 @@
 # See /LICENSE for more information.
 #
 
-name: OpenWrt CR8806 NSS (kuncy7) Builder
+name: OpenWrt CR8806 NSS Builder (official base + overlay)
 
 on:
   repository_dispatch:
@@ -54,8 +60,16 @@ on:
         default: false
 
 env:
-  REPO_URL: https://github.com/kuncy7/openwrt-nss-edma.git
-  REPO_BRANCH: c3po-tag-8021q
+  # Pinned official base: openwrt/openwrt main, 2026-09-25 (immutable tarball
+  # of this exact commit). The NSS increment vendored in diy/cr8806/nss-overlay
+  # was extracted against this commit and its preconditions check it.
+  OFFICIAL_TARBALL_URL: https://codeload.github.com/openwrt/openwrt/tar.gz/3ab520425b127d66617bfeb1e2805b4f20109f95
+  OFFICIAL_BASE_SHA: 3ab520425b127d66617bfeb1e2805b4f20109f95
+  # nss feed (kuncy7/nss-packages, branch ipq50xx-rebase via the tree's
+  # feeds.conf.default): pinned by commit, verified after feeds update.
+  NSS_FEED_PIN: 23ba3ccc5d92815e51872ba950de8dd35988eec5
+  SOURCE_COMMIT: official-3ab520425b1+nss-2f00ddefdba
+  OVERLAY_DIR: diy/cr8806/nss-overlay
   CONFIG_FILE: diy/cr8806/nss_ap.config
   DIY_NSS_SH: diy/cr8806/diy-nss.sh
   ADAPT_SH: diy/cr8806/adapter-nss/apply-cr8806-nss.sh
@@ -117,11 +131,17 @@ jobs:
           echo "DATE3=$(date +'%m.%d')" >> $GITHUB_ENV
           echo "DATE4=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
 
-      - name: Clone source code
+      - name: Download official OpenWrt base & apply NSS overlay
         working-directory: /workdir
         run: |
           df -hT $PWD
-          git clone $REPO_URL -b $REPO_BRANCH ${{ env.TARGET_MATRIX }}
+          mkdir -p ${{ env.TARGET_MATRIX }}
+          # Official OpenWrt main, pinned by commit (immutable tarball).
+          curl -fsSL "$OFFICIAL_TARBALL_URL" | tar -xz --strip-components=1 -C ${{ env.TARGET_MATRIX }}
+          # Vendored NSS increment (diy/cr8806/nss-overlay): verifies the
+          # pinned base by sha256 preconditions, applies A/M/D/symlink,
+          # re-hashes the result — a drift in either direction fails loudly.
+          bash $GITHUB_WORKSPACE/$OVERLAY_DIR/apply-nss-overlay.sh ${{ env.TARGET_MATRIX }}
           ln -sf /workdir/${{ env.TARGET_MATRIX }} $GITHUB_WORKSPACE/${{ env.TARGET_MATRIX }}
 
       - name: Free up disk space
@@ -143,7 +163,7 @@ jobs:
           # Inject CR8806 device support into the NSS tree
           # (must happen before defconfig so the device target exists).
           bash $GITHUB_WORKSPACE/$ADAPT_SH
-          # feeds.conf.default of this tree already names the nss feed
+          # feeds.conf.default of the overlay names the nss feed
           # (kuncy7/nss-packages;ipq50xx-rebase) — the qca-nss-drv kernel
           # modules and nss-firmware come from there.
           ./scripts/feeds update -a
@@ -153,6 +173,15 @@ jobs:
           echo "nss feed packages: $(ls feeds/nss/ | wc -l)"
           ls feeds/nss/ | grep -q 'qca-nss-drv' || {
               echo "::error::the nss feed is missing qca-nss-drv — feeds update may have failed"; exit 1; }
+          # Guard: the feed must be at the pinned commit — a moved branch
+          # could drop the ECM DSA-port patch (0046) the dsa topology needs
+          # (without it ECM tracks flows but never accelerates them).
+          feed_head=$(git -C feeds/nss rev-parse HEAD)
+          echo "nss feed head: $feed_head (pinned: $NSS_FEED_PIN)"
+          [ "$feed_head" = "$NSS_FEED_PIN" ] || {
+              echo "::error::nss feed drifted: expected $NSS_FEED_PIN, got $feed_head"; exit 1; }
+          grep -rq dsa_port_from_netdev feeds/nss/qca-nss-ecm/patches/ || {
+              echo "::error::qca-nss-ecm lacks the DSA-port patch (dsa_port_from_netdev) — wrong feed content"; exit 1; }
           cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           make defconfig
           # defconfig drops a symbol it cannot select; on this build that
@@ -248,14 +277,14 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")-NSS" >> $GITHUB_OUTPUT
           touch release.txt
-          echo "OpenWrt CR8806 NSS (kuncy7 openwrt-nss-edma, kernel 6.18) Build" >> release.txt
+          echo "OpenWrt CR8806 NSS (official base 3ab520425b1 + vendored NSS overlay of kuncy7 c3po-tag-8021q 2f00ddefdba + pinned nss feed 23ba3ccc, kernel 6.18) Build" >> release.txt
           echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, Redmi AX3000 / Xiaomi CR880X)" >> release.txt
           echo "NSS: PPE hardware acceleration (nss-firmware 12.2 + ECM + stmmac/dwmac-ipq5018 + qca8k C-3PO), Wi-Fi offload on for both radios" >> release.txt
           echo "WiFi: 2.4G IPQ5018 + 5G QCN6122, one image covers both RF generations (M79/M81), per-unit RF calibration from the ART partition" >> release.txt
           echo "Mode: standard router — DHCP/firewall/WAN stock (PPPoE-ready), WiFi SSID 'WyHouse' (key wyhouse8888) with 802.11r/k/v at first boot" >> release.txt
           echo "LuCI: Status -> NSS Offload shows firmware state, core load and ECM-accelerated connections" >> release.txt
           echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP (works from stock and from 25.12) | *-squashfs-sysupgrade.bin via LuCI — do NOT keep settings across the 6.12 -> 6.18 kernel jump" >> release.txt
-          echo "Verified in this tree by the community: Redmi AX5400 (identical QCA8337 switch wiring, wired 914/856 Mbps), GL-B3000 + Linksys MX2000 (Wi-Fi offload), Cudy P5 + TP-Link EX511 (256M memory group)." >> release.txt
+          echo "Verified in this tree by the community (the synthesized tree is byte-identical to the kuncy7 branch): Redmi AX5400 (identical QCA8337 switch wiring, wired 914/856 Mbps), GL-B3000 + Linksys MX2000 (Wi-Fi offload), Cudy P5 + TP-Link EX511 (256M memory group)." >> release.txt
           echo "CR8806-specific, NOT yet device-tested: NSS data plane on this board, 256M profiles, per-unit board.bin hotplug generation (mechanism device-verified on 25.12), remoteproc boot-args. First flash reports decide — recovery is always U-boot TFTP back to the 25.12 factory image." >> release.txt
           echo "Date: $(date)" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT

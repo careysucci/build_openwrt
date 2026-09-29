@@ -45,9 +45,17 @@ if [ ! -d "$TARGET_DIR" ]; then
     exit 1
 fi
 
-# ===== Git commit ID (for release branding) =====
-SHORT_COMMIT=$(git -C "$TARGET_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-echo "[DIY-NSS] Source commit: $SHORT_COMMIT"
+# ===== Source description (for release branding) =====
+# The NSS tree is synthesized from the pinned official OpenWrt tarball + the
+# vendored nss-overlay (no .git inside the tree), so the workflow passes the
+# pinned provenance in SOURCE_COMMIT. Fall back to git for manual builds
+# from a real clone.
+if [ -n "${SOURCE_COMMIT:-}" ]; then
+    SHORT_COMMIT="$SOURCE_COMMIT"
+else
+    SHORT_COMMIT=$(git -C "$TARGET_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+fi
+echo "[DIY-NSS] Source: $SHORT_COMMIT"
 
 # ===== Customize banner =====
 if [ -f "diy/banner" ] && [ -d "$TARGET_DIR/package/base-files/files/etc" ]; then
@@ -62,8 +70,12 @@ if [ -f "$TARGET_DIR/package/base-files/files/etc/openwrt_release" ]; then
     sed -i "s/%D/${RELEASE_NAME}/g" "$TARGET_DIR/package/base-files/files/etc/openwrt_release" || true
     sed -i "s/%V/${DATE4}/g" "$TARGET_DIR/package/base-files/files/etc/openwrt_release" || true
     sed -i "s/%C/git-${SHORT_COMMIT}/g" "$TARGET_DIR/package/base-files/files/etc/openwrt_release" || true
+    # %R (DISTRIB_REVISION) is expanded by base-files at build time from
+    # scripts/getver.sh, which prints "unknown" on a tarball tree (no .git);
+    # pin it here instead, same mechanism as the branding above.
+    sed -i "s/%R/${SHORT_COMMIT}/g" "$TARGET_DIR/package/base-files/files/etc/openwrt_release" || true
     sed -i "s/Openwrt/${RELEASE_NAME}/g" "$TARGET_DIR/package/base-files/files/etc/openwrt_release" || true
-    echo "[DIY-NSS] openwrt_release branded: ${RELEASE_NAME} ${DATE4} git-${SHORT_COMMIT}"
+    echo "[DIY-NSS] openwrt_release branded: ${RELEASE_NAME} ${DATE4} ${SHORT_COMMIT}"
 fi
 
 # ===== Brand os-release =====
@@ -71,6 +83,7 @@ if [ -f "$TARGET_DIR/package/base-files/files/usr/lib/os-release" ]; then
     sed -i "s/%D/${RELEASE_NAME}/g" "$TARGET_DIR/package/base-files/files/usr/lib/os-release" || true
     sed -i "s/%V/${DATE4}/g" "$TARGET_DIR/package/base-files/files/usr/lib/os-release" || true
     sed -i "s/%C/git-${SHORT_COMMIT}/g" "$TARGET_DIR/package/base-files/files/usr/lib/os-release" || true
+    sed -i "s/%R/${SHORT_COMMIT}/g" "$TARGET_DIR/package/base-files/files/usr/lib/os-release" || true
 fi
 
 # ===== Install first-boot provisioning (NSS variant) =====
