@@ -209,7 +209,7 @@ jobs:
           touch release.txt
           echo "OpenWrt CR8806 AP (ImmortalWrt openwrt-25.12) Build" >> release.txt
           echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, kernel 6.12)" >> release.txt
-          echo "Mode: standard router — LAN 192.168.1.1/24 with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; LuCI http://192.168.1.1 (root, no initial password)" >> release.txt
+          echo "Mode: standard router — LAN pinned to 172.16.3.19/24 (management address) with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; LuCI http://172.16.3.19 (root, no initial password)" >> release.txt
           echo "WiFi: 2.4G+5G SSID 'WyHouse' (key wyhouse8888), 802.11r/k/v roaming enabled" >> release.txt
           echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP | *-squashfs-sysupgrade.bin via LuCI" >> release.txt
           echo "Date: $(date)" >> release.txt

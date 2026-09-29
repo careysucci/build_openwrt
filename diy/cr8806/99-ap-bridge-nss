@@ -24,8 +24,9 @@
 # Everything else is copied verbatim from 99-ap-bridge (25.12,
 # verified on-device on M79 unit 172.16.3.19).
 #
-# This script configures a STANDARD ROUTER — stock LAN 192.168.1.1/24,
-# DHCP server, firewall and routed WAN (DHCP client or PPPoE, both
+# This script configures a STANDARD ROUTER — LAN pinned to
+# 172.16.3.19/24 (the management address of this deployment), DHCP
+# server, firewall and routed WAN (DHCP client or PPPoE, both
 # work out of the box). It only brands the box and provisions the
 # WiFi below. Converting to a bridged AP is a manual on-device step
 # (recipe: LuCI → Network → Interfaces → Devices → br-lan → add port
@@ -44,11 +45,12 @@
 # timeout it exits 1 so it is retried on the next boot.
 #
 # What it does (everything else stays STOCK router defaults):
-#   1. System: hostname, timezone, LuCI language
-#   2. NSS stack: untouched — nss-tools-dwmac's own 98-nss-offload and
+#   1. LAN pinned to the deployment management address 172.16.3.19/24
+#   2. System: hostname, timezone, LuCI language
+#   3. NSS stack: untouched — nss-tools-dwmac's own 98-nss-offload and
 #      99-nss-topology uci-defaults provision the NSS plane (C-3PO dsa
 #      topology on this qca8k board; Wi-Fi offload on by default)
-#   3. Enables dual-band WiFi, same SSID on both bands:
+#   4. Enables dual-band WiFi, same SSID on both bands:
 #      - 2.4G: HE40, channel 1   (40 MHz doubles the 2x2 HE PHY rate vs
 #        HE20; ch1 measured quietest: noise floor -95 dBm vs -94 on ch6 /
 #        -90 on ch11 — fall back to HE20 only if the secondary 20 MHz
@@ -75,11 +77,22 @@
 
 echo "[99-ap-bridge-nss] provisioning router-mode branding + WiFi..."
 
-# ---- 1. Network: left entirely to the tree's own provisioning ------
-# LAN address, DHCP server, firewall and the routed WAN interface stay
-# EXACTLY as generated (LAN 192.168.1.1/24, WAN as DHCP client — switch
-# to PPPoE in LuCI if the broadband line requires it). Nothing deleted,
-# nothing bridged: the box is a normal router out of the box.
+# ---- 1. Network: fixed management IP -------------------------------
+# LAN is pinned to 172.16.3.19/24 — the management address of this
+# deployment. config_generate wrote stock 192.168.1.1/24 during preinit;
+# this overrides it from uci_apply_defaults (START=10), which runs BEFORE
+# netifd (START=20) first starts — so the box comes up reachable at .19
+# on first boot, no window where it answers at 192.168.1.1. DHCP server,
+# firewall and the routed WAN interface stay EXACTLY as generated (WAN as
+# DHCP client — switch to PPPoE in LuCI if the broadband line requires
+# it). No gateway/DNS is set on lan: in router mode the box itself is the
+# LAN gateway. NOTE: if the WAN uplink also lives in 172.16.3.0/24,
+# routed mode gets a WAN/LAN subnet clash — use the bridged-AP recipe
+# instead in that case.
+uci set network.lan.proto='static'
+uci set network.lan.ipaddr='172.16.3.19'
+uci set network.lan.netmask='255.255.255.0'
+uci commit network
 # packet_steering is NOT set here — see the header: on this tree the
 # NSS firmware owns the data path and nss-tools-dwmac's 98-nss-offload
 # (which runs just before this script) sets the steering-related knobs
@@ -166,5 +179,5 @@ else
     exit 1
 fi
 
-echo "[99-ap-bridge-nss] done. Router defaults kept. LuCI: http://192.168.1.1 (root, no password)"
+echo "[99-ap-bridge-nss] done. LuCI: http://172.16.3.19 (root, no password)"
 exit 0

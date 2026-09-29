@@ -281,7 +281,7 @@ jobs:
           echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, Redmi AX3000 / Xiaomi CR880X)" >> release.txt
           echo "NSS: PPE hardware acceleration (nss-firmware 12.2 + ECM + stmmac/dwmac-ipq5018 + qca8k C-3PO), Wi-Fi offload on for both radios" >> release.txt
           echo "WiFi: 2.4G IPQ5018 + 5G QCN6122, one image covers both RF generations (M79/M81), per-unit RF calibration from the ART partition" >> release.txt
-          echo "Mode: standard router — LAN 192.168.1.1/24 with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; LuCI http://192.168.1.1 (root, no initial password); WiFi SSID 'WyHouse' (key wyhouse8888) with 802.11r/k/v at first boot" >> release.txt
+          echo "Mode: standard router — LAN pinned to 172.16.3.19/24 (management address) with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; LuCI http://172.16.3.19 (root, no initial password); WiFi SSID 'WyHouse' (key wyhouse8888) with 802.11r/k/v at first boot" >> release.txt
           echo "LuCI: Status -> NSS Offload shows firmware state, core load and ECM-accelerated connections" >> release.txt
           echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP (works from stock and from 25.12) | *-squashfs-sysupgrade.bin via LuCI — do NOT keep settings across the 6.12 -> 6.18 kernel jump" >> release.txt
           echo "Verified in this tree by the community (the synthesized tree is byte-identical to the kuncy7 branch): Redmi AX5400 (identical QCA8337 switch wiring, wired 914/856 Mbps), GL-B3000 + Linksys MX2000 (Wi-Fi offload), Cudy P5 + TP-Link EX511 (256M memory group)." >> release.txt
