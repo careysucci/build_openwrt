@@ -28,3 +28,6 @@ bin-release/
 #   _nss_tree/    - NSS build tree clones (openwrt-nss-edma etc.)
 /_*
 /.idea/
+
+# Python bytecode caches (py_compile of the adapter patcher)
+__pycache__/

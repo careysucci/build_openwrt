@@ -1,0 +1,286 @@
+#
+#
+#
+# File: .github/workflows/openwrt-cr8806-nss.yml
+# Description: Build the kuncy7 NSS-enabled firmware for Xiaomi CR8806 / Redmi AX3000
+#
+# Target:  qualcommax/ipq50xx (Qualcomm IPQ5018, aarch64, kernel 6.18)
+# Source:  kuncy7/openwrt-nss-edma @ c3po-tag-8021q — upstream
+#          stmmac/dwmac-ipq5018 MACs + qca8k DSA switch + NSS PPE
+#          hardware acceleration (nss-tools-dwmac runtime, ECM,
+#          ath11k Wi-Fi offload), with CR8806 device support injected
+#          by diy/cr8806/adapter-nss (board DTS, per-unit BDF
+#          generators for both radios, Xiaomi dual-boot sysupgrade).
+#          The NSS data path is hardware-accelerated in the NSS
+#          firmware: WAN<->LAN routing (ECM), bridge forwarding and
+#          both Wi-Fi radios run off-CPU. Same switch wiring as the
+#          community-validated Redmi AX5400 (C-3PO dsa topology).
+# Profile: standard router — DHCP/firewall/WAN stock (PPPoE-ready),
+#          no proxy/NAS apps; first boot brands the box and provisions
+#          dual-band WiFi (802.11r/k/v) via diy/cr8806/99-ap-bridge-nss;
+#          the NSS plane itself is provisioned by the tree's own
+#          uci-defaults (98-nss-offload, 99-nss-topology).
+#
+# Images:  bin/targets/qualcommax/ipq50xx/
+#            *-squashfs-factory.ubi     → flash via U-boot TFTP
+#            *-squashfs-factory.img     → same UBI payload, .img suffix
+#            *-squashfs-sysupgrade.bin  → flash via LuCI/sysupgrade
+#          (do NOT keep settings when crossing the kernel 6.12 → 6.18
+#          jump from the 25.12 builds; a fresh flash is the tested path)
+#
+# Independence: this workflow uses diy/cr8806/diy-nss.sh only; the
+# shared diy-part1.sh / diy-part2.sh, diy-ap.sh and the 25.12 /
+# x86 workflows are untouched. Manual dispatch only.
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+name: OpenWrt CR8806 NSS (kuncy7) Builder
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh_enabled:
+        description: 'ssh'
+        type: boolean
+        required: false
+        default: false
+      clear_actions_cache:
+        description: 'clear actions cache'
+        type: boolean
+        required: false
+        default: false
+
+env:
+  REPO_URL: https://github.com/kuncy7/openwrt-nss-edma.git
+  REPO_BRANCH: c3po-tag-8021q
+  CONFIG_FILE: diy/cr8806/nss_ap.config
+  DIY_NSS_SH: diy/cr8806/diy-nss.sh
+  ADAPT_SH: diy/cr8806/adapter-nss/apply-cr8806-nss.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  AUTHORED_BY: Wy.House
+  IMG_PREFIX: WyHouse
+  TARGET_MATRIX: nss
+  RELEASE_NAME: WyWrt-NSS
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: clear space cache
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.clear_actions_cache }}
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install build-essential clang flex bison g++ gawk \
+          gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+          python3-setuptools rsync swig unzip zlib1g-dev file wget \
+          llvm python3-pyelftools libpython3-dev aria2 jq qemu-utils ccache rename \
+          libelf-dev device-tree-compiler libgmp3-dev libmpc-dev libfuse-dev dwarves zstd \
+          glibc-source
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone "$TZ"
+          sudo mkdir -p /workdir
+          sudo chown $USER:$GROUPS /workdir
+
+      - name: Get current date
+        id: date
+        run: |
+          echo "DATE1=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
+          echo "DATE2=$(date +'%m/%d %Y')" >> $GITHUB_ENV
+          echo "DATE3=$(date +'%m.%d')" >> $GITHUB_ENV
+          echo "DATE4=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
+
+      - name: Clone source code
+        working-directory: /workdir
+        run: |
+          df -hT $PWD
+          git clone $REPO_URL -b $REPO_BRANCH ${{ env.TARGET_MATRIX }}
+          ln -sf /workdir/${{ env.TARGET_MATRIX }} $GITHUB_WORKSPACE/${{ env.TARGET_MATRIX }}
+
+      - name: Free up disk space
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo mkdir -p -m 777 /mnt/${{ env.TARGET_MATRIX }}/dl /mnt/${{ env.TARGET_MATRIX }}/bin /mnt/${{ env.TARGET_MATRIX }}/staging_dir
+          ln -sf /mnt/${{ env.TARGET_MATRIX }}/dl ${{ env.TARGET_MATRIX }}/dl
+          ln -sf /mnt/${{ env.TARGET_MATRIX }}/bin ${{ env.TARGET_MATRIX }}/bin
+          ln -sf /mnt/${{ env.TARGET_MATRIX }}/staging_dir ${{ env.TARGET_MATRIX }}/staging_dir
+
+      - name: Load custom configuration
+        run: |
+          # Standalone diy script (banner/branding/first-boot WiFi
+          # provisioning via the NSS-variant 99-ap-bridge-nss; the NSS
+          # plane's own uci-defaults stay in charge of network tuning).
+          chmod +x ./$DIY_NSS_SH && ./$DIY_NSS_SH
+          cd ${{ env.TARGET_MATRIX }}
+          # Inject CR8806 device support into the NSS tree
+          # (must happen before defconfig so the device target exists).
+          bash $GITHUB_WORKSPACE/$ADAPT_SH
+          # feeds.conf.default of this tree already names the nss feed
+          # (kuncy7/nss-packages;ipq50xx-rebase) — the qca-nss-drv kernel
+          # modules and nss-firmware come from there.
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          # Guard: a failed nss feed fetch would otherwise only surface
+          # as a defconfig silently dropping the NSS packages.
+          echo "nss feed packages: $(ls feeds/nss/ | wc -l)"
+          ls feeds/nss/ | grep -q 'qca-nss-drv' || {
+              echo "::error::the nss feed is missing qca-nss-drv — feeds update may have failed"; exit 1; }
+          cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
+          make defconfig
+          # defconfig drops a symbol it cannot select; on this build that
+          # is an error, not something to gloss over (same guard as the
+          # tree's own CI): every =y line of the seed config must survive.
+          grep -E '^CONFIG_[A-Za-z0-9_-]+=' "$GITHUB_WORKSPACE/${{ env.CONFIG_FILE }}" | sort -u > /tmp/required.txt
+          while IFS= read -r req; do
+            grep -qxF "$req" .config || { echo "::error::defconfig dropped $req"; exit 1; }
+          done < /tmp/required.txt
+          echo "[WORKFLOW] defconfig kept every required symbol ($(wc -l < /tmp/required.txt) checked)"
+
+      - name: SSH Enabled Debug
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
+        with:
+          limit-access-to-actor: true
+
+      - name: Download package
+        id: package
+        run: |
+          cd ${{ env.TARGET_MATRIX }}
+          make download -j$(($(nproc)+1))
+          find dl -size -1024c -exec ls -l {} \;
+          find dl -size -1024c -exec rm -f {} \;
+          make download -j$(($(nproc)+1))
+          echo "[WORKFLOW] Package download completed"
+
+      - name: Compile the firmware
+        id: compile
+        run: |
+          cd ${{ env.TARGET_MATRIX }}
+          echo -e "$(nproc) thread compile"
+          make -j$(nproc) || make -j1 V=s
+          echo "status=success" >> $GITHUB_OUTPUT
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+      - name: Verify images
+        run: |
+          cd ${{ env.TARGET_MATRIX }}/bin/targets/qualcommax/ipq50xx
+          ls -l
+          shopt -s nullglob
+          imgs=(openwrt-*redmi_ax3000*)
+          [ ${#imgs[@]} -gt 0 ] || { echo "::error::no redmi_ax3000 images produced"; exit 1; }
+          for want in factory.ubi factory.img sysupgrade.bin; do
+            found=0
+            for f in "${imgs[@]}"; do case "$f" in *"$want") found=1;; esac; done
+            [ "$found" = 1 ] || { echo "::error::missing *-$want image"; exit 1; }
+          done
+          echo "[WORKFLOW] images verified: ${imgs[*]}"
+
+      - name: SSH Failed Debug
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 15
+        with:
+          limit-access-to-actor: true
+
+      - name: Check space usage
+        if: (!cancelled())
+        run: df -hT
+
+      - name: Upload bin directory
+        uses: actions/upload-artifact@main
+        if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+        with:
+          name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.TARGET_MATRIX }}/bin
+
+      - name: Organize files
+        id: organize
+        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+        run: |
+          cd ${{ env.TARGET_MATRIX }}/bin/targets/*/*
+          rm -rf packages
+          # Remove build metadata files — keep only flashable images
+          rm -f config.buildinfo feeds.buildinfo profiles.json version.buildinfo
+          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware directory
+        uses: actions/upload-artifact@main
+        if: steps.organize.outputs.status == 'success' && !cancelled()
+        with:
+          name: ${{ env.IMG_PREFIX }}_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}
+
+      - name: Generate release tag
+        id: tag
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        run: |
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")-NSS" >> $GITHUB_OUTPUT
+          touch release.txt
+          echo "OpenWrt CR8806 NSS (kuncy7 openwrt-nss-edma, kernel 6.18) Build" >> release.txt
+          echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, Redmi AX3000 / Xiaomi CR880X)" >> release.txt
+          echo "NSS: PPE hardware acceleration (nss-firmware 12.2 + ECM + stmmac/dwmac-ipq5018 + qca8k C-3PO), Wi-Fi offload on for both radios" >> release.txt
+          echo "WiFi: 2.4G IPQ5018 + 5G QCN6122, one image covers both RF generations (M79/M81), per-unit RF calibration from the ART partition" >> release.txt
+          echo "Mode: standard router — DHCP/firewall/WAN stock (PPPoE-ready), WiFi SSID 'WyHouse' (key wyhouse8888) with 802.11r/k/v at first boot" >> release.txt
+          echo "LuCI: Status -> NSS Offload shows firmware state, core load and ECM-accelerated connections" >> release.txt
+          echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP (works from stock and from 25.12) | *-squashfs-sysupgrade.bin via LuCI — do NOT keep settings across the 6.12 -> 6.18 kernel jump" >> release.txt
+          echo "Verified in this tree by the community: Redmi AX5400 (identical QCA8337 switch wiring, wired 914/856 Mbps), GL-B3000 + Linksys MX2000 (Wi-Fi offload), Cudy P5 + TP-Link EX511 (256M memory group)." >> release.txt
+          echo "CR8806-specific, NOT yet device-tested: NSS data plane on this board, 256M profiles, per-unit board.bin hotplug generation (mechanism device-verified on 25.12), remoteproc boot-args. First flash reports decide — recovery is always U-boot TFTP back to the 25.12 factory image." >> release.txt
+          echo "Date: $(date)" >> release.txt
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to release
+        uses: softprops/action-gh-release@master
+        if: steps.tag.outputs.status == 'success' && !cancelled()
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          files: ${{ env.FIRMWARE }}/*
+
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          retain_days: 0
+          keep_minimum_runs: 2
+
+      - name: Remove old Releases
+        uses: dev-drprasad/delete-older-releases@master
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        with:
+          keep_latest: 8
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}

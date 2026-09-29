@@ -1,0 +1,170 @@
+#!/bin/sh
+# =============================================================
+# uci-defaults: 99-ap-bridge-nss
+# Target: Xiaomi CR8806 / Redmi AX3000 — kuncy7 NSS router build
+#         (openwrt-nss-edma, c3po-tag-8021q, kernel 6.18)
+#
+# NSS-tree variant of 99-ap-bridge (the 25.12 device-verified
+# script). Identical behaviour EXCEPT it does NOT touch
+# network.globals.packet_steering:
+#   - on 25.12 (pure host data path) packet_steering=1 spread RX
+#     softirqs over both A53 cores and measurably helped;
+#   - on the NSS tree the data path runs in the NSS firmware and
+#     delivers to the host through N2H queues. The tree's own
+#     98-nss-offload uci-defaults sets packet_steering='0' and
+#     flow_offloading='0' (upstream-measured: 749/800 vs 619/626
+#     Mbit/s through the router with steering on, plus n2h_rx_queue
+#     drops — the steering service's "one NAPI per hardware queue"
+#     model does not describe a firmware-delivered data path, and
+#     its rps_cpus=0 writes clash with the rps mask
+#     net.core.rps_default_mask ships in 12-nss-networking.conf).
+#   - uci-defaults run in filename order, so a '99-*' script setting
+#     packet_steering='1' would silently override the tree's
+#     98-nss-offload. It is therefore left alone here.
+# Everything else is copied verbatim from 99-ap-bridge (25.12,
+# verified on-device on M79 unit 172.16.3.19).
+#
+# This script configures a STANDARD ROUTER — stock LAN 192.168.1.1/24,
+# DHCP server, firewall and routed WAN (DHCP client or PPPoE, both
+# work out of the box). It only brands the box and provisions the
+# WiFi below. Converting to a bridged AP is a manual on-device step
+# (recipe: LuCI → Network → Interfaces → Devices → br-lan → add port
+# 'wan'; delete wan & wan6; lan static address of the main LAN;
+# dhcp.lan.ignore=1; disable firewall + dnsmasq).
+#
+# Runs once at first boot, from uci_apply_defaults inside
+# /etc/init.d/boot (START=10) — i.e. after kmodloader and BEFORE netifd
+# starts. config_generate ran during preinit, so /etc/config/network and
+# /etc/config/system exist by then. /etc/config/wireless does NOT: it is
+# created by the ieee80211 hotplug once the ath11k phys register, which
+# on this board happens AFTER uci_apply_defaults starts (kmodloader
+# finishes ~18s, ath11k probes complete ~19s). The WiFi section below
+# therefore WAITS for the radios — see its comment.
+# The script deletes itself after a successful run (exit 0); on WiFi
+# timeout it exits 1 so it is retried on the next boot.
+#
+# What it does (everything else stays STOCK router defaults):
+#   1. System: hostname, timezone, LuCI language
+#   2. NSS stack: untouched — nss-tools-dwmac's own 98-nss-offload and
+#      99-nss-topology uci-defaults provision the NSS plane (C-3PO dsa
+#      topology on this qca8k board; Wi-Fi offload on by default)
+#   3. Enables dual-band WiFi, same SSID on both bands:
+#      - 2.4G: HE40, channel 1   (40 MHz doubles the 2x2 HE PHY rate vs
+#        HE20; ch1 measured quietest: noise floor -95 dBm vs -94 on ch6 /
+#        -90 on ch11 — fall back to HE20 only if the secondary 20 MHz
+#        turns out busy)
+#      - 5G:   HE80, channel 149 (non-DFS, up instantly, 30 dBm class;
+#        on-device scan: only one -86 dBm neighbor near ch161, while
+#        the 36-48 segment already carries 3 APs. HE80 is the max for
+#        iPhone-12-class clients. QCN6122 does negotiate HE160 too —
+#        measured on-device at 1297/1153 Mbps PHY, iperf3 465/355 Mbps
+#        through the 5G link — but 149-161 offers only 80 MHz
+#        contiguous; HE160 would force DFS channels with CAC/radar risk)
+#      - country US: ath11k firmware is self-managed US on this board;
+#        the BDF caps real output at 23 dBm (2.4G) / 27 dBm (5G) anyway,
+#        while CN regdb would only lower the ceilings (measured)
+#      - 802.11r/k/v fast roaming with a shared mobility domain
+#      - disassoc_low_ack=0: don't kick weak-signal IoT clients
+#
+# Multi-AP roaming (valid once the boxes are converted to bridge mode):
+# flashing every CR8806 with this same firmware gives them identical
+# SSID/password/mobility-domain — clients roam seamlessly over the
+# Ethernet backhaul. For wireless mesh instead, add an 802.11s interface
+# in LuCI (wpad-openssl already supports SAE mesh).
+# =============================================================
+
+echo "[99-ap-bridge-nss] provisioning router-mode branding + WiFi..."
+
+# ---- 1. Network: left entirely to the tree's own provisioning ------
+# LAN address, DHCP server, firewall and the routed WAN interface stay
+# EXACTLY as generated (LAN 192.168.1.1/24, WAN as DHCP client — switch
+# to PPPoE in LuCI if the broadband line requires it). Nothing deleted,
+# nothing bridged: the box is a normal router out of the box.
+# packet_steering is NOT set here — see the header: on this tree the
+# NSS firmware owns the data path and nss-tools-dwmac's 98-nss-offload
+# (which runs just before this script) sets the steering-related knobs
+# to the values measured on the NSS plane.
+
+# ---- 2. System ------------------------------------------------------
+uci set system.@system[0].hostname='WyHouse-AP'
+uci set system.@system[0].timezone='CST-8'
+uci set system.@system[0].zonename='Asia/Shanghai'
+uci commit system
+# LuCI 24.10+ uses BCP47 codes (zh_Hans), not the legacy zh_cn.
+uci set luci.main.lang='zh_Hans'
+uci commit luci
+
+# ---- 3. WiFi: dual-band, one SSID, fast roaming ---------------------
+# Wait for the ieee80211 hotplug to create /etc/config/wireless when the
+# ath11k phys register — on this board they appear ~1s after this script
+# starts (the two probes land ~0.3s apart, so wait for BOTH radios, not
+# just for the file to exist; max 60s). netifd starts after boot()
+# returns (START=20 vs 10) and reads the committed config, so no
+# explicit `wifi reload` is needed here.
+count_radios() {
+    uci -q show wireless 2>/dev/null | grep -c '=wifi-device'
+}
+
+n=0
+while [ "$(count_radios)" -lt 2 ] && [ "$n" -lt 60 ]; do
+    sleep 1
+    n=$((n + 1))
+done
+
+if [ "$(count_radios)" -ge 1 ]; then
+    # Radio-level settings, keyed by band (robust to radio naming)
+    r=0
+    while uci -q get "wireless.@wifi-device[$r]" >/dev/null 2>&1; do
+        band="$(uci -q get "wireless.@wifi-device[$r].band")"
+        uci set "wireless.@wifi-device[$r].disabled=0"
+        # US regdom (see header): matches the ath11k self-managed domain on
+        # this board; real txpower is BDF-capped at 23/27 dBm regardless.
+        uci set "wireless.@wifi-device[$r].country=US"
+        case "$band" in
+            2g)
+                # ch1: quietest on-site (noise floor -95 dBm). HE40: full
+                # speed for 2.4G (2x2 HE40 ≈ 287 Mbps PHY vs 143 at HE20).
+                uci set "wireless.@wifi-device[$r].channel=1"
+                uci set "wireless.@wifi-device[$r].htmode=HE40"
+                ;;
+            5g)
+                # ch149 + HE80: non-DFS, near-empty segment on-site.
+                # HE80 is the max for iPhone-12-class clients; QCN6122
+                # does support HE160 (measured: 1297/1153 Mbps PHY) but
+                # 149-161 has only 80 MHz contiguous and HE160 would
+                # force DFS channels with CAC/radar risk.
+                uci set "wireless.@wifi-device[$r].channel=149"
+                uci set "wireless.@wifi-device[$r].htmode=HE80"
+                ;;
+        esac
+        r=$((r + 1))
+    done
+
+    # Interface-level: identical SSID/key on both bands + 802.11r/k/v.
+    # ft_psk_generate_local=1 → no R0KH/R1KH lists needed across APs.
+    i=0
+    while uci -q get "wireless.@wifi-iface[$i]" >/dev/null 2>&1; do
+        uci set "wireless.@wifi-iface[$i].ssid=WyHouse"
+        uci set "wireless.@wifi-iface[$i].encryption=psk2"
+        uci set "wireless.@wifi-iface[$i].key=wyhouse8888"
+        uci set "wireless.@wifi-iface[$i].ieee80211r=1"
+        uci set "wireless.@wifi-iface[$i].mobility_domain=8888"
+        uci set "wireless.@wifi-iface[$i].ft_over_ds=1"
+        uci set "wireless.@wifi-iface[$i].ft_psk_generate_local=1"
+        uci set "wireless.@wifi-iface[$i].ieee80211k=1"
+        uci set "wireless.@wifi-iface[$i].ieee80211v=1"
+        # Keep weak-signal IoT clients attached (verified on-device)
+        uci set "wireless.@wifi-iface[$i].disassoc_low_ack=0"
+        uci set "wireless.@wifi-iface[$i].wmm=1"
+        i=$((i + 1))
+    done
+    uci commit wireless
+    echo "[99-ap-bridge-nss] WiFi up: 2.4G(HE40/ch1) + 5G(HE80/ch149), SSID=WyHouse, 802.11r/k/v on"
+else
+    echo "[99-ap-bridge-nss] WARNING: no wifi-device in /etc/config/wireless after 60s"
+    echo "[99-ap-bridge-nss] WiFi NOT provisioned — exiting 1 to retry on next boot"
+    exit 1
+fi
+
+echo "[99-ap-bridge-nss] done. Router defaults kept. LuCI: http://192.168.1.1 (root, no password)"
+exit 0

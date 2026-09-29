@@ -1,0 +1,84 @@
+#!/bin/sh
+# 13-ath11k-ipq5018-bdf — generate the per-unit IPQ5018 (2.4 GHz) board.bin
+# at firmware-request time, by extracting the entry matching THIS unit's
+# PA type from the community dual-entry template. One image covers BOTH
+# CR8806 RF board generations (M79 "A" / M81 "B").
+#
+# Why generation instead of a static board-2.bin (differs from the 25.12
+# build): the NSS tree (kernel 6.18, upstream ath11k) has none of the
+# hzyitc board_id override patches (211/212) the older trees carry. There
+# the board_id used for board-2.bin entry matching comes from QMI target
+# cap only, and the WLAN firmware reports 0xFF until it is calibrated —
+# proven by the upstream Cudy P5 / TP-Link EX511 board files on this very
+# tree, whose single entries are all named "bus=ahb,qmi-chip-id=0,
+# qmi-board-id=255". A dual-entry container (ids 0x10 / 0x24) can never
+# match that, and upstream ath11k does NOT fall back to the first entry:
+# on a name mismatch the whole board-2.bin fetch fails and the chain ends
+# at plain "board.bin" (ath11k_core_fetch_board_data_api_1), which is
+# loaded verbatim with NO name matching.
+#
+# So this script writes that board.bin: the 0x20000-byte body of the
+# template entry matching wl_pa_type. Those bodies are byte-identical to
+# the entries the 25.12 build matched statically via qcom,board_id — the
+# per-unit calibration still comes from the stock 11-ath11k-caldata
+# hotplug (ART 0x1000), exactly as on 25.12.
+#
+# Dual-entry template layout (measured in this repo, _nssparse.py):
+#   magic "QCA-ATH11K-BOARD" (0x10) + 4-byte pad + per entry 0x20040
+#   (64-byte header incl. entry name + 0x20000 body):
+#     entry 1: qmi-board-id=16  (0x10, M79) body at 0x54
+#     entry 2: qmi-board-id=36  (0x24, M81) body at 0x20094
+#
+# Trigger: same mechanism as 11-ath11k-caldata — the kernel requests
+# "ath11k/IPQ5018/hw1.0/board.bin" (after board-2.bin misses), the file
+# does not exist, this hook creates it, the kernel retries. The generated
+# file persists in overlayfs; regeneration only happens at first boot or
+# after a factory reset.
+
+[ -e /lib/firmware/$FIRMWARE ] && exit 0
+
+case "$FIRMWARE" in
+"ath11k/IPQ5018/hw1.0/board.bin") ;;
+*) exit 0 ;;
+esac
+
+. /lib/functions.sh
+
+board=$(board_name)
+case "$board" in
+redmi,ax3000) ;;
+*) exit 0 ;;
+esac
+
+TPL="/lib/firmware/ath11k/ipq5018-bdf-template.bin"
+[ -s "$TPL" ] || exit 0
+
+# template sanity: community dual-entry container (M79 id 0x10 + M81 id 0x24)
+[ "$(md5sum "$TPL" | cut -d' ' -f1)" = "9acb0e52055cad7760f9630cf55a6d2e" ] || exit 0
+
+# PA type lives in the u-boot environment (0:appsblenv). NOTE: lowercase
+# partition name — 6.12+ kernels parse Xiaomi's SMEM table to lowercase
+# (verified on-device on the 25.12 build).
+idx="$(find_mtd_index 0:appsblenv)"
+[ -z "$idx" ] && exit 1
+
+case "$(strings /dev/mtdblock$idx | sed -n 's/^wl_pa_type=//p' | head -n 1)" in
+epa)
+        # M81 ("B" hardware): entry 2, board_id 0x24
+        BODY_OFF=$((0x20094))
+        VARIANT="M81"
+        ;;
+xpa|ipa|*)
+        # M79 ("A" hardware): entry 1, board_id 0x10
+        BODY_OFF=$((0x54))
+        VARIANT="M79"
+        ;;
+esac
+
+OUT="/lib/firmware/$FIRMWARE"
+mkdir -p "$(dirname "$OUT")"
+dd if="$TPL" of="$OUT" bs=1 skip=$BODY_OFF count=$((0x20000)) 2>/dev/null
+
+logger -t ath11k-bdf "generated $OUT (dual-entry template, $VARIANT body)" 2>/dev/null
+
+exit 0

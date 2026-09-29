@@ -1,0 +1,469 @@
+// SPDX-License-Identifier: (GPL-2.0+)
+/*
+ * Redmi AX3000 / Xiaomi CR8806 / CR8808 / CR8809 (CR880X series)
+ * NSS build (kuncy7/openwrt-nss-edma, c3po-tag-8021q, kernel 6.18:
+ * upstream stmmac/dwmac-ipq5018 MACs + qca8k DSA switch + NSS cores).
+ *
+ * Sources of each section (keep this map when editing):
+ *   - Ethernet topology (&uniphy0/&gmac0/&gmac1/&mdio1/ethernet-switch):
+ *     ipq5018-redmi-ax5400.dts — same QCA8337 + GE-PHY + SGMII wiring,
+ *     only the port labels differ (CR8806: Phy0-2 = LAN1-3, Phy3 = WAN).
+ *   - QCN6122 5G radio (reserved-memory + &wifi1 + &q6v5_wcss boot-args):
+ *     ipq5018-gl-b3000.dts — same chip, same user-PD wiring.
+ *   - 256 MB RAM recipe (&nss_region 8 MiB + swiotlb=1 + coherent_pool=512K
+ *     + 256M ath11k/NSS memory profiles via kernel config):
+ *     ipq5018-tplink-ex511-v2.dts — the community-verified 256M board on
+ *     this exact tree.
+ *   - Board peripherals (LED/button GPIOs, mdio reset GPIO 26, QCN6122
+ *     reset GPIO 27, smem partitions, ECC strength 4):
+ *     this repo's openwrt-25.12 device DTS, verified on hardware.
+ *
+ * Verified on-device so far (25.12 tree): GPIOs, ECC, partitions, UART on
+ * gpio28/29, QCN6122 UPD2@PCIE1 with reset GPIO 27. NOT yet verified on
+ * this NSS tree: the NSS data plane itself, the dsa (tag_8021q) topology
+ * bring-up, and the 256M memory recipe — these follow the community-
+ * verified AX5400/B3000/EX511 precedents on the same tree.
+ */
+
+/dts-v1/;
+
+#include "ipq5018.dtsi"
+#include "ipq5018-ess.dtsi"
+#include "ipq5018-nss.dtsi"
+#include "ipq5018-qcn6122.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+        model = "Redmi AX3000";
+        compatible = "redmi,ax3000", "qcom,ipq5018";
+
+        aliases {
+                label-mac-device = &gmac0;
+                serial0 = &blsp1_uart1;
+
+                led-boot = &led_system_blue;
+                led-failsafe = &led_system_yellow;
+                led-running = &led_system_blue;
+                led-upgrade = &led_system_yellow;
+        };
+
+        chosen {
+                /* root=/dev/ubiblock0_1: same as the 25.12 build (stock
+                 * U-Boot passes ubi.mtd=rootfs(_1); sysupgrade boots the
+                 * active slot, ubiblock index follows it — verified).
+                 *
+                 * 256 MB recipe (EX511 v2 precedent): swiotlb=1 for the
+                 * stmmac/DMA bounce path and coherent_pool=512K instead of
+                 * the 2M every 512 MB board passes. 512K is safe on this
+                 * tree because the MPD firmware loader does not drain the
+                 * atomic pools (EX511 runs this exact combination).
+                 */
+                bootargs-append = " root=/dev/ubiblock0_1 swiotlb=1 coherent_pool=512K";
+                stdout-path = "serial0:115200n8";
+        };
+
+        keys {
+                compatible = "gpio-keys";
+                pinctrl-0 = <&button_pins>;
+                pinctrl-names = "default";
+
+                button-0 {
+                        label = "reset";
+                        gpios = <&tlmm 25 GPIO_ACTIVE_LOW>;
+                        linux,code = <KEY_RESTART>;
+                        debounce-interval = <60>;
+                };
+
+                button-1 {
+                        label = "mesh";
+                        gpios = <&tlmm 23 GPIO_ACTIVE_LOW>;
+                        linux,code = <KEY_WPS_BUTTON>;
+                        debounce-interval = <60>;
+                };
+        };
+
+        leds {
+                compatible = "gpio-leds";
+                pinctrl-0 = <&led_pins>;
+                pinctrl-names = "default";
+
+                led_system_blue: led-0 {
+                        gpios = <&tlmm 19 GPIO_ACTIVE_HIGH>;
+                        color = <LED_COLOR_ID_BLUE>;
+                        function = LED_FUNCTION_STATUS;
+                        default-state = "on";
+                };
+
+                led_system_yellow: led-1 {
+                        gpios = <&tlmm 17 GPIO_ACTIVE_HIGH>;
+                        color = <LED_COLOR_ID_YELLOW>;
+                        function = LED_FUNCTION_STATUS;
+                };
+
+                led_internet_blue: led-2 {
+                        gpios = <&tlmm 22 GPIO_ACTIVE_HIGH>;
+                        color = <LED_COLOR_ID_BLUE>;
+                        function = LED_FUNCTION_WAN;
+                };
+
+                led_internet_yellow: led-3 {
+                        gpios = <&tlmm 20 GPIO_ACTIVE_HIGH>;
+                        color = <LED_COLOR_ID_YELLOW>;
+                        function = LED_FUNCTION_WAN;
+                };
+        };
+
+        reserved-memory {
+                /* QCN6122 user-PD firmware regions. ath11k patch 913 finds
+                 * these by memory-region-names ("q6-region"/"m3-dump") and
+                 * uses their physical addresses for the BDF download and
+                 * M3 dump instead of qcom,bdf-addr (same layout as B3000).
+                 */
+                q6_region_qcn6122_1: q6-region-qcn6122-1@4d200000 {
+                        reg = <0x0 0x4d200000 0x0 0xd00000>;
+                        no-map;
+                };
+
+                m3_dump_qcn6122_1: m3-dump-qcn6122-1@4df00000 {
+                        reg = <0x0 0x4df00000 0x0 0x100000>;
+                        no-map;
+                };
+        };
+};
+
+/* NSS core DDR region: firmware image + heap. The dtsi default is 16 MiB
+ * (512 MB boards); 256 MiB boards reserve 8 MiB (EX511 v2 precedent, same
+ * firmware family). The reservation is taken off MemTotal before Linux
+ * sees it. If the NSS core stops booting ("nss core 0 booted successfully"
+ * missing in logread) or n2h pbuf allocation failures climb, revert to a
+ * larger region and drop other reservations first.
+ */
+&nss_region {
+        reg = <0x0 0x40000000 0x0 0x800000>;
+};
+
+/* Board clock frequencies — the dtsi only declares the fixed/factor clocks.
+ * Without these the whole clock chain breaks (watchdog loses its input
+ * clock; seen on-device on the 25.12 build, same values as B3000/AX5400).
+ */
+&sleep_clk {
+        clock-frequency = <32000>;
+};
+
+&xo_board_clk {
+        clock-div = <4>;
+        clock-mult = <1>;
+};
+
+&blsp1_uart1 {
+        pinctrl-0 = <&serial_0_pins>;
+        pinctrl-names = "default";
+        status = "okay";
+};
+
+&prng {
+        status = "okay";
+};
+
+&qfprom {
+        status = "okay";
+};
+
+&qpic_bam {
+        status = "okay";
+};
+
+&qpic_nand {
+        pinctrl-0 = <&qpic_pins>;
+        pinctrl-names = "default";
+        status = "okay";
+
+        nand@0 {
+                compatible = "spi-nand";
+                reg = <0>;
+
+                nand-ecc-engine = <&qpic_nand>;
+                /* strength=8 breaks NAND I/O on qpic-snand, use 4 instead
+                 * (same as upstream iodata,wn-dax3000gr; matches the ECC
+                 * layout written by the stock U-boot flasher — verified
+                 * on-device on the 25.12 build)
+                 */
+                nand-ecc-strength = <4>;
+                nand-ecc-step-size = <512>;
+                nand-bus-width = <8>;
+
+                partitions {
+                        compatible = "qcom,smem-part";
+
+                        /* MAC cells follow the Xiaomi family layout used
+                         * by AX5400/AX6000 (art+0x0 = LAN conduit MAC,
+                         * art+0x6 = WAN side). Still to be verified
+                         * against this unit's label on first NSS boot
+                         * (ip link vs label); the 25.12 build shipped no
+                         * MAC nvmem cells at all, so this can only get
+                         * closer to stock, never break boot.
+                         */
+                        partition-0-art {
+                                label = "0:art";
+                                read-only;
+
+                                nvmem-layout {
+                                        compatible = "fixed-layout";
+                                        #address-cells = <1>;
+                                        #size-cells = <1>;
+
+                                        mac_addr_gmac1: macaddr@0 {
+                                                reg = <0x0 0x6>;
+                                        };
+
+                                        mac_addr_gmac0: macaddr@6 {
+                                                reg = <0x6 0x6>;
+                                        };
+                                };
+                        };
+                };
+        };
+};
+
+/*
+*     _______________________             _______________________
+*    |        IPQ5018        |           |        QCA8337        |
+*    | +------+   +--------+ |           | +--------+   +------+ |
+*    | | MAC0 |---| GE Phy |-+--- MDI ---+ | Phy4   |           |
+*    | +------+   +--------+ |           | +--------+           |
+*    | +------+   +--------+ |           | +--------+   +------+ |
+*    | | MAC1 |---| Uniphy |-+-- SGMII---+ | SerDes |---| MAC6 | |
+*    | +------+   +--------+ |           | +--------+   +------+ |
+*    |_______________________|           |_______________________|
+*
+*    CR8806 port map (differs from AX5400): Phy0-2 = LAN1-3, Phy3 = WAN.
+*    gmac0 (eth0) = WAN conduit via GE PHY; gmac1 (eth1) = LAN conduit
+*    via SGMII — same role split as AX5400, so the 02_network case and
+*    the nss-dwmac dsa topology detection (qca8k bound) work unchanged.
+*/
+
+&uniphy0 {
+        status = "okay";
+
+        assigned-clocks = <&uniphy0 UNIPHY_CLK_REF>;
+        assigned-clock-rates = <UNIPHY_REFCLK_25MHZ>;
+};
+
+// MAC0 -> GE Phy (WAN conduit)
+&gmac0 {
+        status = "okay";
+
+        nvmem-cells = <&mac_addr_gmac0 0>;
+        nvmem-cell-names = "mac-address";
+};
+
+// MAC1 ---SGMII---> QCA8337 (LAN conduit)
+&gmac1 {
+        status = "okay";
+
+        phy-mode = "sgmii";
+
+        nvmem-cells = <&mac_addr_gmac1 0>;
+        nvmem-cell-names = "mac-address";
+
+        fixed-link {
+                speed = <1000>;
+                full-duplex;
+        };
+};
+
+&mdio0 {
+        status = "okay";
+};
+
+// IPQ5018 GE Phy -> QCA8337 Phy4 (short in-board MDI run)
+&ge_phy {
+        qcom,dac-preset-short-cable;
+};
+
+&mdio1 {
+        status = "okay";
+
+        pinctrl-0 = <&mdio1_pins>;
+        pinctrl-names = "default";
+        reset-gpios = <&tlmm 26 GPIO_ACTIVE_LOW>;
+
+        // QCA8337 Phy0 -> LAN1
+        qca8337_0: ethernet-phy@0 {
+                reg = <0>;
+        };
+
+        // QCA8337 Phy1 -> LAN2
+        qca8337_1: ethernet-phy@1 {
+                reg = <1>;
+        };
+
+        // QCA8337 Phy2 -> LAN3
+        qca8337_2: ethernet-phy@2 {
+                reg = <2>;
+        };
+
+        // QCA8337 Phy3 -> WAN
+        qca8337_3: ethernet-phy@3 {
+                reg = <3>;
+        };
+
+        // QCA8337 Phy4 -> IPQ5018 GE Phy
+        qca8337_4: ethernet-phy@4 {
+                reg = <4>;
+        };
+
+        // QCA8337 switch
+        ethernet-switch@11 {
+                compatible = "qca,qca8337";
+                reg = <0x11>;
+
+                ethernet-ports {
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+
+                        ethernet-port@1 {
+                                reg = <1>;
+                                label = "lan1";
+                                phy-handle = <&qca8337_0>;
+                        };
+
+                        ethernet-port@2 {
+                                reg = <2>;
+                                label = "lan2";
+                                phy-handle = <&qca8337_1>;
+                        };
+
+                        ethernet-port@3 {
+                                reg = <3>;
+                                label = "lan3";
+                                phy-handle = <&qca8337_2>;
+                        };
+
+                        ethernet-port@4 {
+                                reg = <4>;
+                                label = "wan";
+                                phy-handle = <&qca8337_3>;
+
+                                nvmem-cells = <&mac_addr_gmac0 0>;
+                                nvmem-cell-names = "mac-address";
+                        };
+
+                        ethernet-port@5 {
+                                reg = <5>;
+                                phy-handle = <&qca8337_4>;
+                                phy-mode = "gmii";
+                                ethernet = <&gmac0>;
+                        };
+
+                        ethernet-port@6 {
+                                reg = <6>;
+                                phy-mode = "sgmii";
+                                ethernet = <&gmac1>;
+                                qca,sgmii-enable-pll;
+
+                                fixed-link {
+                                        speed = <1000>;
+                                        full-duplex;
+                                };
+                        };
+                };
+        };
+};
+
+&tlmm {
+        serial_0_pins: serial-0-state {
+                pins = "gpio28", "gpio29";
+                function = "blsp0_uart1";
+                drive-strength = <8>;
+                bias-disable;
+        };
+
+        qpic_pins: qpic-state {
+                clock-pins {
+                        pins = "gpio9";
+                        function = "qspi_clk";
+                        drive-strength = <8>;
+                        bias-disable;
+                };
+
+                cs-pins {
+                        pins = "gpio8";
+                        function = "qspi_cs";
+                        drive-strength = <8>;
+                        bias-disable;
+                };
+
+                data-pins {
+                        pins = "gpio4", "gpio5", "gpio6", "gpio7";
+                        function = "qspi_data";
+                        drive-strength = <8>;
+                        bias-disable;
+                };
+        };
+
+        mdio1_pins: mdio1-state {
+                mdc-pins {
+                        pins = "gpio36";
+                        function = "mdc";
+                        drive-strength = <8>;
+                        bias-pull-up;
+                };
+
+                mdio-pins {
+                        pins = "gpio37";
+                        function = "mdio";
+                        drive-strength = <8>;
+                        bias-pull-up;
+                };
+        };
+
+        led_pins: led-state {
+                pins = "gpio17", "gpio19", "gpio20", "gpio22";
+                function = "gpio";
+                drive-strength = <8>;
+                bias-pull-down;
+        };
+
+        button_pins: button-state {
+                pins = "gpio23", "gpio25";
+                function = "gpio";
+                drive-strength = <8>;
+                bias-pull-up;
+        };
+};
+
+/* v1 UPD boot args (remoteproc patch 0813): UPD2 = QCN6122 on PCIE1 —
+ * exactly this board's wiring. Default UPD2 GPIO is 0x12 (18); CR8806
+ * wires the QCN6122 reset to GPIO 27 (verified on the 25.12 build).
+ */
+&q6v5_wcss {
+        boot-args = <
+                        /*       type: */      0x2     /* PCIE1 */
+                        /*     length: */      4
+                        /*     UPD ID: */      2
+                        /* reset GPIO: */      27
+                        /*   reserved: */      0 0>;
+};
+
+&wifi {
+        // IPQ5018 2.4G
+        status = "okay";
+
+        qcom,rproc = <&q6v5_wcss>;
+        qcom,ath11k-fw-memory-mode = <2>;
+};
+
+&wifi1 {
+        // QCN6122 5G
+        status = "okay";
+
+        qcom,rproc = <&q6v5_wcss>;
+        qcom,ath11k-fw-memory-mode = <2>;
+
+        memory-region = <&q6_region_qcn6122_1>, <&q6_region_ipq5018>, <&m3_dump_qcn6122_1>;
+        memory-region-names = "q6-region", "m3-region", "m3-dump";
+};

@@ -1,0 +1,97 @@
+#!/bin/sh
+# 12-ath11k-qcn6122-bdf — generate the per-unit QCN6122 (5 GHz) board.bin
+# at firmware-request time: community template body + THIS unit's own ART
+# calibration. One image covers BOTH CR8806 RF board generations (M79 "A"
+# and M81 "B") — every unit boots with its own per-unit RF calibration,
+# exactly like stock firmware (which reads the calibration straight from
+# the unit's ART partition).
+#
+# NSS-tree variant of the 25.12 script (device-verified there on M79 unit
+# 172.16.3.19: regenerated file md5 == hand-verified hybrid 2e26588c...,
+# 5G AP visible ch36 @ -61 dBm after being invisible at any range, iperf3
+# over the 5G link 465/355 Mbps). Differences from the 25.12 script:
+#
+#   1. Output is a BARE board.bin (no QCA-ATH11K-BOARD container header),
+#      not board-2.bin. The NSS tree (upstream ath11k, kernel 6.18) has no
+#      board_id override patches, and the QCN6122 firmware reports
+#      qmi-board-id 0xFF from QMI target cap until calibrated (proven by
+#      the upstream Cudy P5 / EX511 qcn6122 board files on this tree,
+#      whose entries are named "...qmi-board-id=255") — a board-2.bin
+#      entry named "...qmi-board-id=96" can never match, and upstream does
+#      NOT fall back to the first entry: the fetch chain ends at plain
+#      board.bin (ath11k_core_fetch_board_data_api_1), loaded verbatim
+#      with NO name matching.
+#   2. Consequently the kernel hands the firmware the same 0x20000 bytes
+#      either way: on 25.12 the container matched by qcom,board_id=0x60
+#      was parsed and only its entry body downloaded to the firmware; the
+#      bare board.bin IS that body. RF behaviour is therefore identical
+#      to the verified 25.12 image — only the kernel-side selection
+#      mechanism changed.
+#
+# Method: keep the template body's board-id zone and MAC/date placeholders
+# (0x0a-0x13, 0x3a-0x45 body-relative — intentionally NOT transplanted);
+# transplant 88 machine-diff zones (3246 bytes: per-unit power calibration
+# tables, board parameter tables, board markers) from ART[0x26800 +
+# 0x20000]. Zone list derived from a three-way diff (template vs M79 ART
+# vs M81 ART), mirrored in make-m79-hybrid.py (offline reference).
+#
+# Trigger: same mechanism as 11-ath11k-caldata — the kernel requests
+# "ath11k/QCN6122/hw1.0/board.bin" (fw.dir is UPPERCASE in this tree,
+# mac80211 patch 920; board-2.bin misses first), the hotplug hook creates
+# the file, the kernel retries. The generated file persists in overlayfs.
+
+[ -e /lib/firmware/$FIRMWARE ] && exit 0
+
+# The kernel requests the BDF as "ath11k/<fw.dir>/board-2.bin" first, then
+# "ath11k/<fw.dir>/board.bin". Only the latter is generated here.
+case "$FIRMWARE" in
+"ath11k/QCN6122/hw1.0/board.bin") ;;
+*) exit 0 ;;
+esac
+
+TPL="/lib/firmware/ath11k/qcn6122-bdf-template.bin"
+[ -s "$TPL" ] || exit 0
+
+# template sanity: community M81-board skeleton, md5 c34b1769883ed4da6b3e34fb73d53946
+[ "$(md5sum "$TPL" | cut -d' ' -f1)" = "c34b1769883ed4da6b3e34fb73d53946" ] || exit 0
+
+# locate the ART partition (label case differs between kernels:
+# 6.6 parses Xiaomi SMEM names as "0:ART", 6.12+ lowercases to "0:art")
+. /lib/functions.sh
+ART=""
+for n in "0:art" "0:ART" "art" "ART"; do
+	idx="$(find_mtd_index "$n")"
+	[ -n "$idx" ] && ART="/dev/mtd$idx" && break
+done
+[ -c "$ART" ] || exit 0
+
+# QCN6122 caldata offset inside ART + template body offset in the container
+ART_OFF=$((0x26800))
+BODY_OFF=84
+
+OUT="/lib/firmware/$FIRMWARE"
+mkdir -p "$(dirname "$OUT")"
+tmp="$OUT.new"
+
+# bare body: template[0x54:0x20054] — the 0x20000-byte entry payload
+dd if="$TPL" of="$tmp" bs=1 skip=$BODY_OFF count=$((0x20000)) 2>/dev/null
+
+# 88 transplant zones: start,end (hex, body-relative, inclusive).
+# Zones 0x0a-0x13 (MAC/date placeholder) and 0x3a-0x45 (board-id 0x60)
+# are intentionally NOT here — they must stay as the template has them.
+ZONES="0x5b,0x5b 0x44c,0x44c 0x598,0x5c9 0x618,0x623 0x8b6,0x8b8 0x8dd,0x8e1 0x1428,0x1429 0x14ac,0x14ad 0x1530,0x1531 0x15b4,0x15b5 0x1638,0x1639 0x16bc,0x16bd 0x1740,0x1741 0x17c4,0x18a9 0x1ee8,0x1f05 0x1f28,0x1f45 0x1f6c,0x1f8a 0x1fac,0x1fca 0x1ff0,0x200e 0x2031,0x204e 0x2075,0x2091 0x20b4,0x20d2 0x20f8,0x2116 0x2138,0x2156 0x217c,0x219a 0x21bc,0x21da 0x2200,0x221e 0x2240,0x225e 0x2284,0x22a2 0x22c4,0x22e2 0x2308,0x2326 0x2348,0x2366 0x238c,0x23aa 0x23cc,0x23ea 0x2410,0x242e 0x2450,0x246e 0x2745,0x2745 0x3748,0x3766 0x3788,0x3803 0x3ada,0x3ada 0x3b27,0x3b27 0x3bb0,0x3bdc 0x3eda,0x3f27 0x45be,0x46c2 0x10742,0x10774 0x10796,0x107b4 0x107da,0x107f8 0x1081a,0x10838 0x1085e,0x1087c 0x1089e,0x108bb 0x108e2,0x10900 0x10922,0x1093e 0x10966,0x10984 0x109a6,0x109c4 0x109ea,0x10a08 0x10a2a,0x10a48 0x10a6e,0x10a8b 0x10aae,0x10acb 0x10af2,0x10b0f 0x10b32,0x10b4f 0x10c7e,0x10db3 0x11fd2,0x11fd2 0x15262,0x15267 0x189f6,0x189f6 0x18a6d,0x18a99 0x1ed,0x1ed 0xf5b,0xf68 0xf7d,0xf7d 0x1c16,0x1c25 0x1c54,0x1c70 0x1c94,0x1cb2 0x1cd8,0x1cf6 0x1d18,0x1d36 0x1d5c,0x1d7a 0x1d9c,0x1dba 0x1de0,0x1dfe 0x1e20,0x1e3e 0x1e64,0x1e81 0x1ea4,0x1ec1 0x2494,0x272b 0x2760,0x2777 0x47be,0x4cb2 0xe29d,0xe2c9 0x106e4,0x106f0 0x13a12,0x13a12 0x150e8,0x150e8 0x151d4,0x151f0 0x15214,0x15230"
+
+for z in $ZONES; do
+	s=${z%,*}
+	e=${z##*,}
+	# seek is body-relative here: the output file IS the body (on 25.12
+	# every seek was HDR+s because the output still carried the container)
+	dd if="$ART" of="$tmp" bs=1 \
+		skip=$((ART_OFF + s)) seek=$s \
+		count=$((e - s + 1)) conv=notrunc 2>/dev/null
+done
+
+mv "$tmp" "$OUT"
+logger -t ath11k-bdf "generated $OUT (template body + unit ART, 88 zones)" 2>/dev/null
+
+exit 0
