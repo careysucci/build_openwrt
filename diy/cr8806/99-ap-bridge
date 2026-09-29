@@ -35,11 +35,17 @@
 #   1. System: hostname, timezone, LuCI language
 #   2. packet_steering=1: RX softirqs spread over both A53 cores
 #   3. Enables dual-band WiFi, same SSID on both bands:
-#      - 2.4G: HE20, channel 1   (on-device measured: quietest band,
-#        noise floor -95 dBm vs -94 on ch6 / -90 on ch11)
+#      - 2.4G: HE40, channel 1   (40 MHz doubles the 2x2 HE PHY rate vs
+#        HE20; ch1 measured quietest: noise floor -95 dBm vs -94 on ch6 /
+#        -90 on ch11 — fall back to HE20 only if the secondary 20 MHz
+#        turns out busy)
 #      - 5G:   HE80, channel 149 (non-DFS, up instantly, 30 dBm class;
 #        on-device scan: only one -86 dBm neighbor near ch161, while
-#        the 36-48 segment already carries 3 APs)
+#        the 36-48 segment already carries 3 APs. HE80 is the max for
+#        iPhone-12-class clients. QCN6122 does negotiate HE160 too —
+#        measured on-device at 1297/1153 Mbps PHY, iperf3 465/355 Mbps
+#        through the 5G link — but 149-161 offers only 80 MHz
+#        contiguous; HE160 would force DFS channels with CAC/radar risk)
 #      - country US: ath11k firmware is self-managed US on this board;
 #        the BDF caps real output at 23 dBm (2.4G) / 27 dBm (5G) anyway,
 #        while CN regdb would only lower the ceilings (measured)
@@ -103,13 +109,17 @@ if [ "$(count_radios)" -ge 1 ]; then
         uci set "wireless.@wifi-device[$r].country=US"
         case "$band" in
             2g)
-                # ch1: quietest on-site (noise floor -95 dBm)
+                # ch1: quietest on-site (noise floor -95 dBm). HE40: full
+                # speed for 2.4G (2x2 HE40 ≈ 287 Mbps PHY vs 143 at HE20).
                 uci set "wireless.@wifi-device[$r].channel=1"
-                uci set "wireless.@wifi-device[$r].htmode=HE20"
+                uci set "wireless.@wifi-device[$r].htmode=HE40"
                 ;;
             5g)
                 # ch149 + HE80: non-DFS, near-empty segment on-site.
-                # (160MHz is unsupported by QCN6122 anyway.)
+                # HE80 is the max for iPhone-12-class clients; QCN6122
+                # does support HE160 (measured: 1297/1153 Mbps PHY) but
+                # 149-161 has only 80 MHz contiguous and HE160 would
+                # force DFS channels with CAC/radar risk.
                 uci set "wireless.@wifi-device[$r].channel=149"
                 uci set "wireless.@wifi-device[$r].htmode=HE80"
                 ;;
@@ -136,7 +146,7 @@ if [ "$(count_radios)" -ge 1 ]; then
         i=$((i + 1))
     done
     uci commit wireless
-    echo "[99-ap-bridge] WiFi up: 2.4G(HE20/ch1) + 5G(HE80/ch149), SSID=WyHouse, 802.11r/k/v on"
+    echo "[99-ap-bridge] WiFi up: 2.4G(HE40/ch1) + 5G(HE80/ch149), SSID=WyHouse, 802.11r/k/v on"
 else
     echo "[99-ap-bridge] WARNING: no wifi-device in /etc/config/wireless after 60s"
     echo "[99-ap-bridge] WiFi NOT provisioned — exiting 1 to retry on next boot"

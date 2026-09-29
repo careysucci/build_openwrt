@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Regenerate the M79-calibrated QCN6122 hybrid BDF (board-2.bin).
+"""Regenerate the per-unit QCN6122 hybrid BDF (board-2.bin) — offline
+reference implementation.
+
+The build NO LONGER ships a static QCN6122 board-2.bin. Instead the
+12-ath11k-qcn6122-bdf firmware hotplug script generates it per-unit at
+boot (community template + the unit's own ART calibration), so ONE image
+covers both M79 ("A") and M81 ("B") CR8806 RF boards.
+
+This script is the offline reference implementation of that generation
+logic and the authoritative source of the ZONES list — the hotplug
+script's zone tokens are extracted from this file programmatically, so
+edit the zones HERE, not there. Use it to reproduce the generation on a
+PC for verification or debugging.
 
 Background
 ----------
@@ -10,7 +22,9 @@ per-unit RF calibration. On M79-hardware units the ath11k firmware consumes
 those wrong calibration/board parameters and the 5 GHz radio radiates
 near-zero power — clients cannot see the SSID even at 20 cm, while the
 stock firmware (which reads calibration straight from the unit's own ART
-partition) works fine.
+partition) works fine. Shipping an M79-calibrated file instead would hit
+M81 units with the mirror-image defect; generating from the unit's own
+ART sidesteps both.
 
 Fix (verified on the M79 unit 172.16.3.19)
 ------------------------------------------
@@ -24,21 +38,24 @@ parameter tables and M79 markers. Result: neighbour AP sees ch36 @ -60 dBm
 Usage
 -----
     python3 make-m79-hybrid.py \
-        --template board-redmi_ax3000.qcn6122.orig \
+        --template qcn6122-bdf-template \
         --art art_m79.bin \
-        --out board-redmi_ax3000.qcn6122
+        --out board-2.bin
 
 ART can be dumped on the unit with:
     dd if=/dev/mtd13 of=/tmp/art.bin   # the "0:ART" partition (1 MiB)
 
 Self-check: with the template above and the ART of unit 172.16.3.19
 (md5 6b4d60f18ea02838c8e1df56fcc3ac07), the output md5 must be
-2e26588c248c4f4b307a5d53a17ba587.
+2e26588c248c4f4b307a5d53a17ba587 — the on-device hotplug script
+reproduces exactly this file on that unit (verified: manual run
+byte-identical; after deleting board-2.bin the boot-time hotplug
+regenerated it with the same md5, ath11k booted clean).
 
-ONLY VALID FOR M79-HARDWARE UNITS; M81 units would get wrong caldata.
-Zone list derived from a three-way diff (template vs M79 ART vs M81 ART);
-on another M79 unit the structural zones should still apply, but re-verify
-air time afterwards.
+On other units (M79 or M81): the ZONES offsets are structural (derived
+from a three-way diff: template vs M79 ART vs M81 ART) and apply to both
+board generations; the transplanted VALUES always come from the unit's
+own ART. Re-verify 5G air time after flashing.
 """
 
 import argparse
