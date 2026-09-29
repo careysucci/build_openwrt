@@ -54,7 +54,7 @@ on:
         default: false
 
 env:
-  REPO_URL: https://github.com/kuncy7/openwrt-nss-edma.git
+  REPO_URL: https://github.com/JuliusBairaktaris/openwrt-nss-edma.git
   REPO_BRANCH: c3po-tag-8021q
   CONFIG_FILE: diy/cr8806/nss_ap.config
   DIY_NSS_SH: diy/cr8806/diy-nss.sh
