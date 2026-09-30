@@ -8,11 +8,24 @@
 > 的驱动覆盖（profile 注入 + 显式选择）满足 1G/2.5G/5G/10G 全档——本文档只讲
 > 宿主机侧需要做的事，按收益分三档。
 
+**各项必做程度总览**（详释见对应章节）：
+
+| 配置项 | 程度 | 不做的后果 |
+|---|---|---|
+| virtio `queues=6` | **必须** | 单队列 10G 单流物理上卡死（约 4~6Gbps 封顶） |
+| `cpu: host` | 强烈建议 | 缺失 AES-NI/AVX2 等指令集直通，整体性能打折 |
+| `cores: 6` | 建议 | 4 核也够 10G，2 核紧张 |
+| `balloon: 0` | 可省 | 仅宿主内存有压力时 ballooning 回收才造成抖动 |
+| `memory: 4096` | 按需 | 2G 起步可跑，代理场景给 4G 更稳 |
+| 宿主 governor performance | 可省 | 持续打流影响小，仅轻载突发第一波有频率爬坡延迟 |
+| 大页 / 绑核 / C-state（第二档） | 可选 | +5~10% 余量，不影响达标 10G |
+| 巨帧 9000（第三档） | 特定场景 | 不开时 1500 亦可线速，开了省 CPU |
+
 ---
 
-## 第一档：必做（拿到约 90% 收益）
+## 第一档：核心项（拿到约 90% 收益）
 
-### 1. VM 网卡：VirtIO + 多队列（最大的单项杠杆）
+### 1. VM 网卡：VirtIO + 多队列【必须，唯一的硬前提】
 
 `/etc/pve/qemu-server/<vmid>.conf`（或 `qm set`）：
 
@@ -27,16 +40,16 @@ net1: virtio=BC:24:11:AA:BB:DD,bridge=vmbr1,queues=6
   OpenWrt 网络配置无需调整。
 - 宿主确认 vhost 已启用（PVE 默认开启）：`lsmod | grep vhost_net`。
 
-### 2. CPU 与内存
+### 2. CPU 与内存【cpu: host 强烈建议；其余按需可省】
 
 ```
-cpu: host          # host-passthrough，直出 AES-NI/AVX2
-cores: 6
-balloon: 0         # 关 ballooning，消除内存回收抖动（延迟敏感）
-memory: 4096       # conntrack 52万条目 + mihomo 运行余量
+cpu: host          # host-passthrough，直出 AES-NI/AVX2（强烈建议）
+cores: 6           # 建议；4 核也够 10G
+balloon: 0         # 可省——仅宿主内存有压力时回收才造成抖动
+memory: 4096       # 按需；2G 起步可跑，代理场景 4G 更稳
 ```
 
-### 3. 宿主机 CPU governor
+### 3. 宿主机 CPU governor【建议，可省】
 
 OpenWrt VM 内 netopt.sh 的 governor 设置在无 cpufreq 直通时是 no-op
 （脚本会打印跳过提示）——真正的频率开关在宿主机：
