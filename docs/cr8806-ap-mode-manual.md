@@ -35,6 +35,8 @@
 3. **确认目标 IP 没被占用**：在电脑上 `ping 172.16.0.226`，应当**不通**（通了说明有设备在用，换一个如 `.227`，后续文档中的 `.226` 同步替换）。
 4. 浏览器打开 `http://172.16.3.19`，用户名 `root`、密码留空，登录。
 
+> ⚠️ **本机型实测警告（2026-09-30）**：第 2–6 节的逐条“保存并应用”路径在本机踩坑——其中“WAN 口并入 br-lan”一步的在线重载会触发交换机硬件转发崩坏、管理彻底失联（症状与恢复见附录 A 条目 4）。**本机型请直接走第 9 节的“一次性 SSH 配置 + 重启生效”路径**；第 2–6 节保留作通用参考（单 conduit 机型可用）。
+
 ---
 
 ## 2. 第一步：关闭 DHCP 服务（必须最先做！）
@@ -57,10 +59,12 @@
 
 1. 菜单 **网络 → 接口** → 顶部 **「设备」标签页**（Devices）。
 2. 找到 **br-lan** 行，点 **「配置」**。
-3. 在 **「桥接端口」**（Bridge ports）多选框中，**勾选 `wan`**（原有 `lan1`–`lan4` 保持勾选）。
+3. 在 **「桥接端口」**（Bridge ports）多选框中，**勾选 `wan`**（原有 `lan1`–`lan3` 保持勾选；本机共 3 个 LAN 口 + 1 个 WAN 口）。
 4. 「保存」→ 回到设备列表再 **「保存并应用」**。
 
-**验证**：br-lan 配置页端口列表显示 5 个口（lan1–lan4 + wan）。此步不断网——电脑仍连在 lan 口上。
+> ⚠️ **本机型勿单独执行本节**——此步的在线重载正是 2026-09-30 实测触发失联的一步（附录 A 条目 4）。请改走第 9 节。
+
+**验证**：br-lan 配置页端口列表显示 4 个口（lan1–lan3 + wan）。
 
 ---
 
@@ -117,7 +121,8 @@
 
 ## 8. 等效命令版（SSH，供命令行党）
 
-> 前提：先完成第 6 步设好密码，SSH 才可登录（`ssh root@172.16.0.226`）。下列命令与上面图形步骤**等效**，二选一即可。
+> 前提：先完成第 6 步设好密码，SSH 才可登录（`ssh root@172.16.0.226`）。下列命令与上面图形步骤**等效**。
+> ⚠️ **本机型注意**：这些命令若以 `/etc/init.d/network restart` 收尾，同样会触发附录 A 条目 4 的在线重载坑——本机型请改用第 9 节的幂等整合版（写盘后直接 `reboot`）。
 
 ```sh
 # ---- 1. DHCP off（必须最先） ----
@@ -147,10 +152,68 @@ uci commit network
 /etc/init.d/odhcpd disable
 echo -e '密码\n密码' | passwd root   # 或交互式 passwd
 
-# ---- 5. 一次生效并固化 ----
-/etc/init.d/network restart
+# ---- 5. 生效（本机型勿用 network restart：在线重载有附录 A 条目 4 风险，直接重启） ----
 reboot
 ```
+
+---
+
+## 9. 推荐路径：一次性 SSH 配置 + 重启生效（本机型专用）
+
+> 背景（2026-09-30 实测）：本机型“保存并应用”的网络改动走 netifd **在线重载**，其中“WAN 口并入 br-lan”一步会触发交换机硬件转发崩坏、管理彻底失联（机制与恢复见附录 A 条目 4）。本路径把全部改动**一次性写盘、用重启代替在线重载**——重启时网桥全新创建，绕开该坑。脚本幂等，无论之前做到第几步（或第 3 节失败已被自动回滚过）都可以直接执行。
+
+**前置**：盒子处于可达状态。若已失联，先按附录 A 条目 4 冷启动恢复。
+
+1. 浏览器登录 `http://172.16.3.19`（root / 空密码）。
+2. 菜单 **系统 → 管理权 → 路由器密码** 设一个密码（如 `111111`）——SSH 密码登录的前提（空密码时 dropbear 只收公钥）。
+3. 电脑执行 `ssh root@172.16.3.19`（密码 = 第 2 步所设）。
+4. 将下面整段脚本复制粘贴执行（等效完成第 2–6 节全部改动 + 双分区 flag 归位）：
+
+```sh
+# ---------- CR8806 桥接 AP 一次性配置（幂等，可重复执行） ----------
+# 1) DHCP / RA / DHCPv6 全关（第 2 节等效）
+uci set dhcp.lan.ignore='1'
+uci set dhcp.lan.ra='disabled'
+uci set dhcp.lan.dhcpv6='disabled'
+uci commit dhcp
+
+# 2) 定位 br-lan 设备段（匿名/命名段通吃），WAN 并入桥（第 3 节等效，防重复）
+sec=$(uci show network | sed -n "s/^\(network\.[^=]*\)\.name='br-lan'$/\1/p" | head -1)
+[ -n "$sec" ] || { echo 'ERROR: br-lan device section not found'; exit 1; }
+uci get "$sec.ports" | grep -qw wan || uci add_list "$sec.ports"='wan'
+
+# 3) 删 wan/wan6（第 4 节等效；不存在则静默跳过）
+uci -q delete network.wan
+uci -q delete network.wan6
+
+# 4) LAN = 172.16.0.226/21（第 5 节等效）
+uci set network.lan.proto='static'
+uci set network.lan.ipaddr='172.16.0.226'
+uci set network.lan.netmask='255.255.248.0'
+uci -q delete network.lan.gateway
+uci -q delete network.lan.dns
+# 主网查到网关的话解开下一行：
+# uci set network.lan.gateway='172.16.0.1'
+uci commit network
+
+# 5) 纯 AP 用不到的服务禁自启（第 6 节等效）
+/etc/init.d/firewall disable
+/etc/init.d/dnsmasq disable
+/etc/init.d/odhcpd disable
+
+# 6) 双分区 flag 归位（锁死系统 2，防断电回退 kmiit，见附录 A 双分区说明）
+fw_setenv flag_boot_rootfs 1
+fw_setenv flag_last_success 1
+fw_setenv flag_boot_success 1
+fw_setenv flag_try_sys1_failed 0
+fw_setenv flag_try_sys2_failed 0
+fw_setenv flag_ota_reboot 0
+
+# 7) 重启生效（SSH 会话断开属预期；勿用 /etc/init.d/network restart —— 见附录 A 条目 4）
+reboot
+```
+
+**重启后**：等约 2 分钟，浏览器访问 **`http://172.16.0.226`**（root / 第 2 步所设密码），按第 7 节清单逐项验证。
 
 ---
 
@@ -171,6 +234,10 @@ reboot
   fw_setenv flag_ota_reboot 0
   ```
   > 注意：下午构建的固件里 `/etc/init.d/uboot_env` 是旧版逻辑，启动成功后**不会**清 `flag_try_sys2_failed`——U-Boot 引导前会把它预置为 1，若期间断电重启过一次，U-Boot 会认为系统 2 启动失败而**回退到系统 1（kmiit）**。所以 AP 化完成后建议把上面 6 条命令跑一遍，把所有标记归位（尤其 `flag_try_sys2_failed=0`）。仓库最新代码（commit `e5dbf81`）已修复该逻辑，之后用新固件刷新即无此问题。
+- **「WAN 口并入 br-lan」保存并应用后彻底失联（本机实测 2026-09-30）**：
+  - 症状：LuCI 转圈后断开，此后 `ping 172.16.3.19` 全部失败、ARP 无应答（网口链路灯仍正常）；IPv6 link-local 探测可见内核存活但管理服务全不可用（22/53 端口拒连 = dropbear/dnsmasq 已不监听，80 超时 = uhttpd 无响应）——CPU 活着，网络数据面崩了。
+  - 机制：LuCI 的“保存并应用”= netifd **在线重载**（且带约 90 秒未确认自动回滚）。CR8806 为双 conduit 拓扑（LAN1-3 → eth1/SGMII，WAN → eth0/GE PHY，见 `adapter-25.12/ipq5000-ax3000.dts`），WAN 口从独立接口转入 br-lan 触发**跨 conduit 的桥在线重建**，QCA8337 交换机硬件转发表与内核桥状态脱节（本仓库已知坑“QCA 交换机内核桥状态与硬件转发脱节”），数据面全黑。
+  - 疗法：**拔电源 ≥10 秒冷启动**（交换机硬件状态需断电复位）。未确认的应用约 90 秒后自动回滚——重启后通常回到改动前状态（LAN 仍为 `172.16.3.19` 可达，已确认过的第 2 节 DHCP 关闭保留，第 3 节的 WAN 入桥被撤销）；若个别情形回滚未发生，br-lan 会带 WAN 直接启动，同样正常。两种结果都不影响第 9 节脚本（幂等）。恢复后**勿再分步应用**，直接走第 9 节。
 - **彻底救砖**：U-Boot TFTP——电脑配 `192.168.31.100`，上电时按住 reset 进 TFTP 模式，推 `factory.ubi`（192.168.31.x 网段，与运行网段无关）。
 
 ## 附录 B：常见坑
@@ -182,6 +249,7 @@ reboot
 | root 空密码时折腾 SSH | dropbear 拒绝密码登录（只收公钥），误以为 SSH 坏了 | 先在 LuCI 设密码即解锁 |
 | 刷新固件时勾选"保留配置" | 旧配置（含本 AP 配置）会带入新固件 | 想回到出厂路由形态就用 `sysupgrade -n`；想保留 AP 形态就保留配置 |
 | 刷新固件不保留配置 | 回到固件预配置的**标准路由模式**（LAN `172.16.3.19/24`，见仓库 commit `712949f`） | 刷完后重跑本手册即可 |
+| 分步“保存并应用”网络改动（尤其 WAN 入桥） | 在线桥重建触发交换机转发崩坏，管理失联（附录 A 条目 4） | 本机型走第 9 节一次性脚本 + 重启生效 |
 
 ## 附录 C：`icmp: detected local route ...` 日志的完整解释
 
