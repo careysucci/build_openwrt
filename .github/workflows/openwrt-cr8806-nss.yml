@@ -165,7 +165,13 @@ jobs:
           bash $GITHUB_WORKSPACE/$ADAPT_SH
           # feeds.conf.default of the overlay names the nss feed
           # (kuncy7/nss-packages;ipq50xx-rebase) — the qca-nss-drv kernel
-          # modules and nss-firmware come from there.
+          # modules and nss-firmware come from there. The branch moves
+          # upstream (it did: 23ba3ccc -> 15298eb8 pushed 2026-09-29,
+          # tripping that day's build), so rewrite the moving branch
+          # reference to the pinned commit before fetching; the guard
+          # below then verifies the pin instead of racing every push.
+          sed -i "s#\(src-git nss .*\);ipq50xx-rebase#\1^$NSS_FEED_PIN#" feeds.conf.default
+          grep '^src-git nss' feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           # Guard: a failed nss feed fetch would otherwise only surface
