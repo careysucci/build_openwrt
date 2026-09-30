@@ -160,14 +160,14 @@ reboot
 
 ## 9. 推荐路径：一次性 SSH 配置 + 重启生效（本机型专用）
 
-> 背景（2026-09-30 实测）：本机型“保存并应用”的网络改动走 netifd **在线重载**，其中“WAN 口并入 br-lan”一步会触发交换机硬件转发崩坏、管理彻底失联（机制与恢复见附录 A 条目 4）。本路径把全部改动**一次性写盘、用重启代替在线重载**——重启时网桥全新创建，绕开该坑。脚本幂等，无论之前做到第几步（或第 3 节失败已被自动回滚过）都可以直接执行。
+> 背景（2026-09-30 实测，两个独立的坑）：①本机型“保存并应用”的网络改动走 netifd **在线重载**，其中“WAN 口并入 br-lan”一步会触发交换机硬件转发崩坏、管理彻底失联（机制与恢复见附录 A 条目 4）。②本平台 WAN 口默认走 eth0（GMAC0 PHY-to-PHY）conduit，该通路在主线 qca8k 驱动上**收方向是死的**（openwrt#24696，Redmi AX5400 同接线同病）——不改 conduit 的话 WAN 口并入桥后仍然不通（附录 A 条目 5）。本路径把全部改动**一次性写盘、用重启代替在线重载**，并把 WAN conduit 归一到 eth1，一并绕开两个坑。脚本幂等，无论之前做到第几步都可以直接执行。
 
 **前置**：盒子处于可达状态。若已失联，先按附录 A 条目 4 冷启动恢复。
 
 1. 浏览器登录 `http://172.16.3.19`（root / 空密码）。
 2. 菜单 **系统 → 管理权 → 路由器密码** 设一个密码（如 `111111`）——SSH 密码登录的前提（空密码时 dropbear 只收公钥）。
 3. 电脑执行 `ssh root@172.16.3.19`（密码 = 第 2 步所设）。
-4. 将下面整段脚本复制粘贴执行（等效完成第 2–6 节全部改动 + 双分区 flag 归位）：
+4. 将下面整段脚本复制粘贴执行（等效完成第 2–6 节全部改动 + WAN conduit 归一 + 双分区 flag 归位）：
 
 ```sh
 # ---------- CR8806 桥接 AP 一次性配置（幂等，可重复执行） ----------
@@ -181,6 +181,13 @@ uci commit dhcp
 sec=$(uci show network | sed -n "s/^\(network\.[^=]*\)\.name='br-lan'$/\1/p" | head -1)
 [ -n "$sec" ] || { echo 'ERROR: br-lan device section not found'; exit 1; }
 uci get "$sec.ports" | grep -qw wan || uci add_list "$sec.ports"='wan'
+
+# 2b) WAN 口 conduit 归一到 eth1（关键！本平台 eth0/GMAC0 收方向死，openwrt#24696）
+uci show network | grep -q "conduit='eth1'" || {
+    d=$(uci add network device)
+    uci set network.$d.name='wan'
+    uci set network.$d.conduit='eth1'
+}
 
 # 3) 删 wan/wan6（第 4 节等效；不存在则静默跳过）
 uci -q delete network.wan
@@ -213,7 +220,7 @@ fw_setenv flag_ota_reboot 0
 reboot
 ```
 
-**重启后**：等约 2 分钟，浏览器访问 **`http://172.16.0.226`**（root / 第 2 步所设密码），按第 7 节清单逐项验证。
+**重启后**：等约 2 分钟，浏览器访问 **`http://172.16.0.226`**（root / 第 2 步所设密码），按第 7 节清单逐项验证。conduit 生效的内核级证据：`ls /sys/class/net/wan/` 里出现 `lower_eth1`（默认 eth0 时是 `lower_eth0`）。
 
 ---
 
@@ -238,6 +245,11 @@ reboot
   - 症状：LuCI 转圈后断开，此后 `ping 172.16.3.19` 全部失败、ARP 无应答（网口链路灯仍正常）；IPv6 link-local 探测可见内核存活但管理服务全不可用（22/53 端口拒连 = dropbear/dnsmasq 已不监听，80 超时 = uhttpd 无响应）——CPU 活着，网络数据面崩了。
   - 机制：LuCI 的“保存并应用”= netifd **在线重载**（且带约 90 秒未确认自动回滚）。CR8806 为双 conduit 拓扑（LAN1-3 → eth1/SGMII，WAN → eth0/GE PHY，见 `adapter-25.12/ipq5000-ax3000.dts`），WAN 口从独立接口转入 br-lan 触发**跨 conduit 的桥在线重建**，QCA8337 交换机硬件转发表与内核桥状态脱节（本仓库已知坑“QCA 交换机内核桥状态与硬件转发脱节”），数据面全黑。
   - 疗法：**拔电源 ≥10 秒冷启动**（交换机硬件状态需断电复位）。未确认的应用约 90 秒后自动回滚——重启后通常回到改动前状态（LAN 仍为 `172.16.3.19` 可达，已确认过的第 2 节 DHCP 关闭保留，第 3 节的 WAN 入桥被撤销）；若个别情形回滚未发生，br-lan 会带 WAN 直接启动，同样正常。两种结果都不影响第 9 节脚本（幂等）。恢复后**勿再分步应用**，直接走第 9 节。
+- **WAN 口已在桥里、链路灯也亮，但就是不通过流量（本机实测 2026-09-30）**：
+  - 症状：br-lan 成员含 wan、网线插上链路 up，但接在 WAN 口的设备完全不通；dmesg 有 `adpt_mp_port_netdev_change_notify ... incorrect port 0` / `ssdk_dev_event ... netdev change notify failed`。
+  - 机制：本机 WAN 口默认 DSA conduit 是 eth0（IPQ5018 GMAC0 经内置 GE PHY 与 QCA8337 port5 PHY-to-PHY 相接），该通路在主线 qca8k 驱动上**收方向不工作**（openwrt#24696；Redmi AX5400 同接线同病。本仓库 NSS 线的 99-nss-topology 正是因此把 WAN 归一到 eth1——社区实测 AX5400 同拓扑 914/856 Mbps）。
+  - 疗法：给 wan 口单独建 `config device` 段设 `option conduit 'eth1'`（第 9 节脚本 2b 步已含）+ 重启。注意：conduit 变更**必须重启生效**，在线重载无效（且会踩条目 4）。
+  - 波及范围：**路由模式同样中招**——WAN 口走 eth0 conduit 时 DHCP 拨号/静态 IP 都收不到包。任何用 WAN 口的形态都应把 conduit 归一到 eth1。
 - **彻底救砖**：U-Boot TFTP——电脑配 `192.168.31.100`，上电时按住 reset 进 TFTP 模式，推 `factory.ubi`（192.168.31.x 网段，与运行网段无关）。
 
 ## 附录 B：常见坑
@@ -250,6 +262,8 @@ reboot
 | 刷新固件时勾选"保留配置" | 旧配置（含本 AP 配置）会带入新固件 | 想回到出厂路由形态就用 `sysupgrade -n`；想保留 AP 形态就保留配置 |
 | 刷新固件不保留配置 | 回到固件预配置的**标准路由模式**（LAN `172.16.3.19/24`，见仓库 commit `712949f`） | 刷完后重跑本手册即可 |
 | 分步“保存并应用”网络改动（尤其 WAN 入桥） | 在线桥重建触发交换机转发崩坏，管理失联（附录 A 条目 4） | 本机型走第 9 节一次性脚本 + 重启生效 |
+| WAN 口沿用默认 eth0 conduit | 桥接/路由模式下 WAN 口收方向全死（附录 A 条目 5，openwrt#24696） | 给 wan 设 `conduit 'eth1'`（第 9 节脚本 2b 步已含） |
+| netmask 填 /24 同时又填网关 172.16.3.x | 网关不在链路上，默认路由装不上，盒子自身不出网 | 主网是 /21：掩码 `255.255.248.0`，网关自然 on-link（第 9 节脚本已含） |
 
 ## 附录 C：`icmp: detected local route ...` 日志的完整解释
 
