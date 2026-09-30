@@ -86,6 +86,26 @@ if [ -f "diy/${BANNER_FILE}" ] && [ -d "$TARGET_DIR/package/base-files/files/etc
     fi
 fi
 
+# ===== Provide the apk package-version REVISION (getver.sh) =====
+# The tree is a tarball + overlay (no .git), so scripts/getver.sh falls
+# through to REV="unknown". base-files then versions its apk as
+# "<commitcount>~unknown" and host apk mkpkg rejects it:
+#   ERROR: info field 'version' has invalid value: package version is invalid
+# getver.sh's FIRST choice is a plain "version" file in the tree root,
+# which is also how the official release tarballs ship their revision.
+# Write one shaped like a real git revision "r<n>-<shortsha>" so the
+# resulting base-files version matches what the official buildbot
+# publishes (e.g. base-files-1708~5c8e736980.apk): only the last
+# dash-separated word feeds the apk version, and it must start with a
+# digit (hex commit prefix), never a letter like "unknown".
+NSS_VERSION_SHA="${OFFICIAL_BASE_SHA:-}"
+if [ -z "$NSS_VERSION_SHA" ]; then
+    NSS_VERSION_SHA=$(git -C "$TARGET_DIR" rev-parse --short=10 HEAD 2>/dev/null || echo "")
+fi
+[ -n "$NSS_VERSION_SHA" ] || NSS_VERSION_SHA="0000000000"
+printf 'r0-%s\n' "${NSS_VERSION_SHA:0:10}" > "$TARGET_DIR/version"
+echo "[DIY-NSS] version file written: $(cat "$TARGET_DIR/version") (REVISION for apk package versions)"
+
 # ===== Brand openwrt_release =====
 if [ -f "$TARGET_DIR/package/base-files/files/etc/openwrt_release" ]; then
     sed -i "s/%D/${RELEASE_NAME}/g" "$TARGET_DIR/package/base-files/files/etc/openwrt_release" || true
