@@ -6,7 +6,7 @@
 #
 # NSS-tree variant of 99-ap-bridge (the 25.12 device-verified
 # script). Identical behaviour EXCEPT it does NOT touch
-# network.globals.packet_steering:
+# network.globals.packet_steering and does NOT set the WAN conduit:
 #   - on 25.12 (pure host data path) packet_steering=1 spread RX
 #     softirqs over both A53 cores and measurably helped;
 #   - on the NSS tree the data path runs in the NSS firmware and
@@ -21,6 +21,15 @@
 #   - uci-defaults run in filename order, so a '99-*' script setting
 #     packet_steering='1' would silently override the tree's
 #     98-nss-offload. It is therefore left alone here.
+#   - the WAN conduit unification (eth0 -> eth1; openwrt#24696: the
+#     GMAC0 PHY-to-PHY link has no working RX on qca8k) that
+#     99-ap-bridge does on the 25.12 line is handled on this tree by
+#     nss-tools-dwmac's own 99-nss-topology, which runs AFTER this
+#     script, reads the effective conduits from board.json + uci and
+#     unifies every port onto the majority link (eth1 here). Setting
+#     it here as well would be redundant and would skew that script's
+#     vote; the stock board.d split (lan1-3 -> eth1, wan -> eth0) is
+#     kept for it to fix.
 # Everything else is copied verbatim from 99-ap-bridge (25.12,
 # verified on-device on M79 unit 172.16.3.19).
 #
@@ -49,7 +58,9 @@
 #   2. System: hostname, timezone, LuCI language
 #   3. NSS stack: untouched — nss-tools-dwmac's own 98-nss-offload and
 #      99-nss-topology uci-defaults provision the NSS plane (C-3PO dsa
-#      topology on this qca8k board; Wi-Fi offload on by default)
+#      topology on this qca8k board; Wi-Fi offload on by default).
+#      99-nss-topology also unifies the WAN conduit onto eth1 — the
+#      openwrt#24696 workaround the 25.12 line does in 99-ap-bridge
 #   4. Enables dual-band WiFi, same SSID on both bands:
 #      - 2.4G: HE40, channel 1   (40 MHz doubles the 2x2 HE PHY rate vs
 #        HE20; ch1 measured quietest: noise floor -95 dBm vs -94 on ch6 /

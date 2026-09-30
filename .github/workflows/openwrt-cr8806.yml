@@ -222,7 +222,7 @@ jobs:
           touch release.txt
           echo "OpenWrt CR8806 AP (official openwrt-25.12) Build" >> release.txt
           echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, kernel 6.12)" >> release.txt
-          echo "Mode: bridged AP — all ports bridged, DHCP/firewall off, mgmt http://172.16.3.19" >> release.txt
+          echo "Mode: standard router — LAN pinned to 172.16.3.19/24 (management address) with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; WAN port conduit unified to eth1 (openwrt#24696 workaround); LuCI http://172.16.3.19 (root, no initial password)" >> release.txt
           echo "WiFi: 2.4G+5G SSID 'WyHouse' (key wyhouse8888), 802.11r/k/v roaming enabled" >> release.txt
           echo "Perf: irqbalance + packet steering + GRO — gigabit line rate (all ports are 1GbE)" >> release.txt
           echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP | *-squashfs-sysupgrade.bin via LuCI" >> release.txt

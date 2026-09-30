@@ -34,9 +34,13 @@
 #
 # What it does (everything else stays STOCK router defaults):
 #   1. LAN pinned to the deployment management address 172.16.3.19/24
-#   2. System: hostname, timezone, LuCI language
-#   3. packet_steering=1: RX softirqs spread over both A53 cores
-#   4. Enables dual-band WiFi, same SSID on both bands:
+#   2. WAN port conduit unified to eth1 — the stock eth0 conduit
+#      (GMAC0 PHY-to-PHY into QCA8337 port 5) has no working RX on
+#      mainline qca8k (openwrt#24696); without it the routed WAN DHCP
+#      client never hears a reply (verified on-device 2026-09-30)
+#   3. System: hostname, timezone, LuCI language
+#   4. packet_steering=1: RX softirqs spread over both A53 cores
+#   5. Enables dual-band WiFi, same SSID on both bands:
 #      - 2.4G: HE40, channel 1   (40 MHz doubles the 2x2 HE PHY rate vs
 #        HE20; ch1 measured quietest: noise floor -95 dBm vs -94 on ch6 /
 #        -90 on ch11 — fall back to HE20 only if the secondary 20 MHz
@@ -83,6 +87,22 @@ uci set network.lan.proto='static'
 uci set network.lan.ipaddr='172.16.3.19'
 uci set network.lan.netmask='255.255.255.0'
 uci set network.globals.packet_steering='1'
+# WAN conduit -> eth1: the wan port ships on conduit eth0 (GMAC0
+# PHY-to-PHY into QCA8337 port 5) and that path has NO working RX on
+# the mainline qca8k driver (openwrt#24696, same wiring as the Redmi
+# AX5400; dmesg: adpt_mp_port_netdev_change_notify "incorrect port 0").
+# Without this override the routed WAN DHCP client never receives a
+# reply, and a bridged wan port passes no traffic (both verified
+# on-device 2026-09-30; fix evidence: /sys/class/net/wan/lower_eth1).
+# A `config device` section naming wan overrides board.json's
+# network_device.wan.conduit; reuse an existing section if one exists
+# (two sections for one device are not an option). Runs before netifd
+# (START=20) first starts, so first boot already comes up with a
+# working WAN port.
+wsec="$(uci show network 2>/dev/null | sed -n "s/^\(network\.[^=]*\)\.name='wan'$/\1/p" | head -n1)"
+[ -n "$wsec" ] || wsec="$(uci add network device)"
+uci set "$wsec.name=wan"
+uci set "$wsec.conduit=eth1"
 uci commit network
 
 # ---- 2. System ------------------------------------------------------
