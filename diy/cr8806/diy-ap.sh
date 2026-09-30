@@ -30,12 +30,33 @@ fi
 SHORT_COMMIT=$(git -C "$TARGET_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "[DIY-AP] Source commit: $SHORT_COMMIT"
 
-# ===== Customize banner =====
-if [ -f "diy/banner" ] && [ -d "$TARGET_DIR/package/base-files/files/etc" ]; then
-    cp -f diy/banner "$TARGET_DIR/package/base-files/files/etc/banner"
-    sed -i "s/%D %V, %C/OpenWrt AP by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" \
-        "$TARGET_DIR/package/base-files/files/etc/banner" || true
-    echo "[DIY-AP] banner installed"
+# ===== Customize banner (selectable per build) =====
+# BANNER_FILE (workflow dispatch input, default per build family) picks
+# the diy/banner* file that ships:
+#   banner             - static text -> /etc/banner (legacy path)
+#   banner-wyhousewrt  - executable script -> /etc/profile.d/
+#                        99-wyhouse-banner.sh: /etc/profile sources it
+#                        on each interactive login with stdout kept on
+#                        the terminal (true on official main/25.12, Lean
+#                        and ImmortalWrt), so it reports live data;
+#                        /etc/banner is emptied to avoid a second logo.
+BANNER_FILE="${BANNER_FILE:-banner}"
+if [ -f "diy/${BANNER_FILE}" ] && [ -d "$TARGET_DIR/package/base-files/files/etc" ]; then
+    if [ "${BANNER_FILE}" = "banner-wyhousewrt" ]; then
+        mkdir -p "$TARGET_DIR/package/base-files/files/etc/profile.d"
+        sed -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
+            -e "s#__BUILD_DATE__#$(date +'%Y-%m-%d')#g" \
+            "diy/${BANNER_FILE}" \
+            > "$TARGET_DIR/package/base-files/files/etc/profile.d/99-wyhouse-banner.sh" || true
+        chmod +x "$TARGET_DIR/package/base-files/files/etc/profile.d/99-wyhouse-banner.sh"
+        : > "$TARGET_DIR/package/base-files/files/etc/banner"
+        echo "[DIY-AP] dynamic banner installed (etc/profile.d/99-wyhouse-banner.sh)"
+    else
+        cp -f "diy/${BANNER_FILE}" "$TARGET_DIR/package/base-files/files/etc/banner"
+        sed -i "s/%D %V, %C/OpenWrt AP by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" \
+            "$TARGET_DIR/package/base-files/files/etc/banner" || true
+        echo "[DIY-AP] static banner installed (diy/${BANNER_FILE} -> /etc/banner)"
+    fi
 fi
 
 # ===== Brand openwrt_release =====

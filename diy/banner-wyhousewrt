@@ -1,0 +1,80 @@
+#!/bin/sh
+# ------------------------------------------------------------------
+#  1. Top Visual Header: WyWrt (Style 1 Slant) + wyhouse forever
+# ------------------------------------------------------------------
+cat << "EOF"
+ _    _         _    _        _
+| |  | |       | |  | |      | |
+| |  | | _   _ | |  | | _ __ | |_
+| |/\| || | | || |/\| || '__|| __|
+\  /\  /| |_| |\  /\  /| |   | |_
+ \/  \/  \__, | \/  \/ |_|    \__|
+          __/ |
+         |___/  wyhouse forever
+------------------------------------------------------------------------------
+EOF
+
+# ------------------------------------------------------------------
+#  2. Build details (left column) & live system metrics (right column)
+#     share the same 4 rows: build details are left-aligned, system
+#     metrics are right-aligned against column 78. BUILDER / BUILD_DATE
+#     below are build-time placeholders: the diy scripts sed-in the
+#     real values when installing this file as
+#     /etc/profile.d/99-wyhouse-banner.sh; everything else is read
+#     live from the running system at every login.
+# ------------------------------------------------------------------
+BUILDER="__AUTHORED_BY__"
+BUILD_DATE="__BUILD_DATE__"
+
+FW_VERSION=$(sed -n "s/^DISTRIB_RELEASE='\(.*\)'/\1/p" /etc/openwrt_release 2>/dev/null)
+KERNEL_VERSION=$(uname -r)
+
+# Fetch primary Local IP address
+LAN_IP=$(ip -4 addr show 2>/dev/null | grep -v '127.0.0.1' | awk '/inet / {print $2}' | cut -d/ -f1 | head -n 1)
+
+# Fetch CPU Temperature
+if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+    CPU_TEMP=$(awk '{print $1/1000}' /sys/class/thermal/thermal_zone0/temp | cut -d. -f1)°C
+elif [ -f /sys/class/hwmon/hwmon0/temp1_input ]; then
+    CPU_TEMP=$(awk '{print $1/1000}' /sys/class/hwmon/hwmon0/temp1_input | cut -d. -f1)°C
+else
+    CPU_TEMP="N/A"
+fi
+
+# Fetch Memory (Used / Total)
+MEM_TOTAL=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')
+MEM_USED=$(free -m 2>/dev/null | awk '/Mem:/ {print $3}')
+
+# Fetch Load Average
+SYS_LOAD=$(uptime 2>/dev/null | awk -F'load average:' '{print $2}' | sed 's/^ //')
+
+LEFT1="  * Build Date: ${BUILD_DATE}"
+LEFT2="  * Compiled By: ${BUILDER}"
+LEFT3="  * Firmware Version: ${FW_VERSION:-WyWrt v1.0}"
+LEFT4="  * Kernel Version: ${KERNEL_VERSION}"
+
+RIGHT1="* LAN IP Address: ${LAN_IP:-No IP Detected}"
+RIGHT2="* CPU Load Avg: ${SYS_LOAD:-N/A}"
+RIGHT3="* CPU Temperature: ${CPU_TEMP}"
+RIGHT4="* Memory Usage: ${MEM_USED:-0} MB / ${MEM_TOTAL:-0} MB"
+
+# print_row <left> <right>: print the left text as-is, then the right
+# text right-aligned so its last column lands on 78. The printf field
+# width covers the right text itself, so fw = 78 minus the left length.
+# Width math is byte-based (busybox pads %*s by bytes, C-locale
+# independent); the degree sign is 2 bytes but prints 1 column, so its
+# field gets one extra byte back to compensate.
+print_row() {
+    right=$2
+    rw=$(printf '%s' "$right" | wc -c)
+    fw=$(( 78 - ${#1} ))
+    case "$right" in *°*) fw=$(( fw + 1 )) ;; esac
+    [ "$fw" -lt $(( rw + 1 )) ] && fw=$(( rw + 1 ))
+    printf '%s%*s\n' "$1" "$fw" "$right"
+}
+
+print_row "$LEFT1" "$RIGHT1"
+print_row "$LEFT2" "$RIGHT2"
+print_row "$LEFT3" "$RIGHT3"
+print_row "$LEFT4" "$RIGHT4"
+echo "------------------------------------------------------------------------------"

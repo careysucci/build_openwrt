@@ -49,12 +49,33 @@ elif [ -f "$TARGET_DIR/feeds/luci/Makefile" ]; then
     sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' "$TARGET_DIR/feeds/luci/Makefile" || true
 fi
 
-# ===== Customize banner and release info =====
-echo "[DIY-P2] Customizing system banner..."
+# ===== Customize banner (selectable per build) =====
+# BANNER_FILE (workflow dispatch input, default per build family) picks
+# the diy/banner* file that ships:
+#   banner             - static text -> /etc/banner (legacy path)
+#   banner-wyhousewrt  - executable script -> /etc/profile.d/
+#                        99-wyhouse-banner.sh: /etc/profile sources it
+#                        on each interactive login with stdout kept on
+#                        the terminal (true on official main/25.12, Lean
+#                        and ImmortalWrt), so it reports live data;
+#                        /etc/banner is emptied to avoid a second logo.
+BANNER_FILE="${BANNER_FILE:-banner-wyhousewrt}"
 if [ -d "$TARGET_DIR/package/base-files/files/etc" ]; then
-    if [ -f "diy/banner" ]; then
-        cp -f diy/banner "$TARGET_DIR/package/base-files/files/etc/banner" || true
-        sed -i "s/%D %V, %C/OpenWrt by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" "$TARGET_DIR/package/base-files/files/etc/banner" || true
+    if [ -f "diy/${BANNER_FILE}" ]; then
+        if [ "${BANNER_FILE}" = "banner-wyhousewrt" ]; then
+            mkdir -p "$TARGET_DIR/package/base-files/files/etc/profile.d"
+            sed -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
+                -e "s#__BUILD_DATE__#$(date +'%Y-%m-%d')#g" \
+                "diy/${BANNER_FILE}" \
+                > "$TARGET_DIR/package/base-files/files/etc/profile.d/99-wyhouse-banner.sh" || true
+            chmod +x "$TARGET_DIR/package/base-files/files/etc/profile.d/99-wyhouse-banner.sh" || true
+            : > "$TARGET_DIR/package/base-files/files/etc/banner" || true
+            echo "[DIY-P2] dynamic banner installed (etc/profile.d/99-wyhouse-banner.sh)"
+        else
+            cp -f "diy/${BANNER_FILE}" "$TARGET_DIR/package/base-files/files/etc/banner" || true
+            sed -i "s/%D %V, %C/OpenWrt by ${AUTHORED_BY} $(date +'%Y-%m-%d')/g" "$TARGET_DIR/package/base-files/files/etc/banner" || true
+            echo "[DIY-P2] static banner installed (diy/${BANNER_FILE} -> /etc/banner)"
+        fi
     fi
 fi
 

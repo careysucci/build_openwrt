@@ -34,6 +34,14 @@ on:
           - 1.26
           - 1.25
           - 1.24
+      banner:
+        description: 'banner style (static text / dynamic script)'
+        type: choice
+        required: false
+        default: banner-wyhousewrt
+        options:
+          - banner
+          - banner-wyhousewrt
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede.git
@@ -45,6 +53,10 @@ env:
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
+  # Banner selection (dispatch input): banner = static /etc/banner text,
+  # banner-wyhousewrt = dynamic profile.d script (see the banner section
+  # of $DIY_P2_SH).
+  BANNER_FILE: ${{ inputs.banner || 'banner-wyhousewrt' }}
   AUTHORED_BY: Wy.House
   IMG_PREFIX: WyHouse
   TARGET_MATRIX: lede

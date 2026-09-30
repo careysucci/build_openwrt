@@ -58,6 +58,14 @@ on:
         type: boolean
         required: false
         default: false
+      banner:
+        description: 'banner style (static text / dynamic script)'
+        type: choice
+        required: false
+        default: banner
+        options:
+          - banner
+          - banner-wyhousewrt
 
 env:
   # Pinned official base: openwrt/openwrt main, 2026-09-25 (immutable tarball
@@ -76,6 +84,10 @@ env:
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
+  # Banner selection (dispatch input): banner = static /etc/banner text,
+  # banner-wyhousewrt = dynamic profile.d script (see the banner section
+  # of $DIY_NSS_SH).
+  BANNER_FILE: ${{ inputs.banner || 'banner' }}
   AUTHORED_BY: Wy.House
   IMG_PREFIX: WyHouse
   TARGET_MATRIX: nss
