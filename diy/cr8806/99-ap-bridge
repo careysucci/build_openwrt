@@ -33,7 +33,10 @@
 # timeout it exits 1 so it is retried on the next boot.
 #
 # What it does (everything else stays STOCK router defaults):
-#   1. LAN pinned to the deployment management address 172.16.3.19/24
+#   1. LAN pinned to the deployment management address 172.16.3.19/24 —
+#      ONLY on a factory-fresh config; a settings-kept sysupgrade of an
+#      already-deployed box (e.g. one converted to a bridged AP with its
+#      own management IP) keeps its address untouched
 #   2. WAN port conduit unified to eth1 — the stock eth0 conduit
 #      (GMAC0 PHY-to-PHY into QCA8337 port 5) has no working RX on
 #      mainline qca8k (openwrt#24696); without it the routed WAN DHCP
@@ -80,12 +83,25 @@ echo "[99-ap-bridge] provisioning router-mode branding + WiFi..."
 # the header). NOTE: if the WAN uplink also lives in 172.16.3.0/24,
 # routed mode gets a WAN/LAN subnet clash — use the bridged-AP recipe
 # instead in that case.
+#
+# Idempotency (measured the hard way, 2026-10-01): uci-defaults also run
+# after a settings-kept sysupgrade, when /etc/config/network carries the
+# admin's own address. Pinning unconditionally then RESETS a deployed
+# box's management IP (an AP at 172.16.0.226 was flipped back to .19 —
+# the admin found the box at the wrong address and went spelunking in
+# LuCI). Guard: only pin when lan still holds the factory default
+# (192.168.1.1) or has no address at all.
 # Packet steering: spread RX softirq load across both A53 cores, so a
 # single core cannot bottleneck WiFi<->wired forwarding at line rate.
 # (netifd >= 22.03 honors network.globals.packet_steering → RPS on all ifaces)
-uci set network.lan.proto='static'
-uci set network.lan.ipaddr='172.16.3.19'
-uci set network.lan.netmask='255.255.255.0'
+lan_cur_ip="$(uci -q get network.lan.ipaddr)"
+if [ -z "$lan_cur_ip" ] || [ "$lan_cur_ip" = "192.168.1.1" ]; then
+    uci set network.lan.proto='static'
+    uci set network.lan.ipaddr='172.16.3.19'
+    uci set network.lan.netmask='255.255.255.0'
+else
+    echo "[99-ap-bridge] lan already at $lan_cur_ip — keeping it (settings-kept upgrade)"
+fi
 uci set network.globals.packet_steering='1'
 # WAN conduit -> eth1: the wan port ships on conduit eth0 (GMAC0
 # PHY-to-PHY into QCA8337 port 5) and that path has NO working RX on

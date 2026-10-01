@@ -54,7 +54,10 @@
 # timeout it exits 1 so it is retried on the next boot.
 #
 # What it does (everything else stays STOCK router defaults):
-#   1. LAN pinned to the deployment management address 172.16.3.19/24
+#   1. LAN pinned to the deployment management address 172.16.3.19/24 —
+#      ONLY on a factory-fresh config; a settings-kept sysupgrade of an
+#      already-deployed box (e.g. one converted to a bridged AP with its
+#      own management IP) keeps its address untouched
 #   2. System: hostname, timezone, LuCI language
 #   3. NSS stack: untouched — nss-tools-dwmac's own 98-nss-offload and
 #      99-nss-topology uci-defaults provision the NSS plane (C-3PO dsa
@@ -100,9 +103,22 @@ echo "[99-ap-bridge-nss] provisioning router-mode branding + WiFi..."
 # LAN gateway. NOTE: if the WAN uplink also lives in 172.16.3.0/24,
 # routed mode gets a WAN/LAN subnet clash — use the bridged-AP recipe
 # instead in that case.
-uci set network.lan.proto='static'
-uci set network.lan.ipaddr='172.16.3.19'
-uci set network.lan.netmask='255.255.255.0'
+#
+# Idempotency (measured the hard way, 2026-10-01): uci-defaults also run
+# after a settings-kept sysupgrade, when /etc/config/network carries the
+# admin's own address. Pinning unconditionally then RESETS a deployed
+# box's management IP (an AP at 172.16.0.226 was flipped back to .19 —
+# the admin found the box at the wrong address and went spelunking in
+# LuCI). Guard: only pin when lan still holds the factory default
+# (192.168.1.1) or has no address at all.
+lan_cur_ip="$(uci -q get network.lan.ipaddr)"
+if [ -z "$lan_cur_ip" ] || [ "$lan_cur_ip" = "192.168.1.1" ]; then
+    uci set network.lan.proto='static'
+    uci set network.lan.ipaddr='172.16.3.19'
+    uci set network.lan.netmask='255.255.255.0'
+else
+    echo "[99-ap-bridge-nss] lan already at $lan_cur_ip — keeping it (settings-kept upgrade)"
+fi
 uci commit network
 # packet_steering is NOT set here — see the header: on this tree the
 # NSS firmware owns the data path and nss-tools-dwmac's 98-nss-offload
