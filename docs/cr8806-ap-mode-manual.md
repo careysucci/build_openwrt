@@ -160,7 +160,7 @@ reboot
 
 ## 9. 推荐路径：一次性 SSH 配置 + 重启生效（本机型专用）
 
-> 背景（2026-09-30 / 10-01 实测，三个独立的坑）：①本机型“保存并应用”的网络改动走 netifd **在线重载**，其中“WAN 口并入 br-lan”一步会触发交换机硬件转发崩坏、管理彻底失联（机制与恢复见附录 A 条目 4）。②本平台 WAN 口默认走 eth0（GMAC0 PHY-to-PHY）conduit，该通路在主线 qca8k 驱动上**收方向是死的**（openwrt#24696，Redmi AX5400 同接线同病）——不改 conduit 的话 WAN 口并入桥后仍然不通（附录 A 条目 5）。③LuCI 设备页没有 conduit 字段，在那里保存过 wan/br-lan 设备会把 conduit **静默洗掉**、留下无名空壳段（附录 B）——2b 步因此自带空段清理。本路径把全部改动**一次性写盘、用重启代替在线重载**，并把 WAN conduit 归一到 eth1，一并绕开三个坑。脚本幂等，无论之前做到第几步都可以直接执行。
+> 背景（2026-09-30 / 10-01 实测，三个独立的坑）：①本机型“保存并应用”的网络改动走 netifd **在线重载**，其中“WAN 口并入 br-lan”一步会触发交换机硬件转发崩坏、管理彻底失联（机制与恢复见附录 A 条目 4）。②本平台 WAN 口默认走 eth0（GMAC0 PHY-to-PHY）conduit，该通路在主线 qca8k 驱动上**收方向是死的**（openwrt#24696，Redmi AX5400 同接线同病）——不改 conduit 的话 WAN 口并入桥后仍然不通（附录 A 条目 5）。③LuCI 对 conduit 零感知，设备页 wan 行的**「取消配置 / Unconfigure」**按钮会把整个 wan 设备段（连同 conduit）**整段删除**——一次误点即撤销 conduit 归一（附录 B；注意编辑器「保存」本身**不**洗字段，杀手是删除类操作）。本路径把全部改动**一次性写盘、用重启代替在线重载**，并把 WAN conduit 归一到 eth1（若已被删则 2b 步自愈），一并绕开三个坑。脚本幂等，无论之前做到第几步都可以直接执行。
 
 **前置**：盒子处于可达状态。若已失联，先按附录 A 条目 4 冷启动恢复。
 
@@ -183,9 +183,11 @@ sec=$(uci show network | sed -n "s/^\(network\.[^=]*\)\.name='br-lan'$/\1/p" | h
 uci get "$sec.ports" | grep -qw wan || uci add_list "$sec.ports"='wan'
 
 # 2b) WAN 口 conduit 归一到 eth1（关键！本平台 eth0/GMAC0 收方向死，openwrt#24696）
-#     先清掉 LuCI 设备页保存时洗出的无名空 device 段（LuCI 设备编辑器没有
-#     conduit 字段，保存会把不认识的选项洗掉、留下空壳段——conduit 修复被静默
-#     撤销就是这个机制），再确保 wan 段存在且 conduit=eth1（已有则复用，防同名双段）
+#     先清掉无名空 device 段（读码定案 2026-10-01：conduit 段的消失是**整段被删**
+#     ——设备页 wan 行「取消配置/Unconfigure」按钮或手动 uci delete；LuCI 表单
+#     逐选项写入，编辑器「保存」不会洗掉未知字段。无名空段则来自设备页
+#     「添加设备配置」类流程或手动 uci add 未完成），再确保 wan 段存在且
+#     conduit=eth1（已有则复用，防同名双段）
 i=0
 while uci -q get network.@device[$i] >/dev/null 2>&1; do
     if [ -z "$(uci -q get network.@device[$i].name)" ]; then
@@ -274,7 +276,7 @@ reboot
 | 刷新固件不保留配置 | 回到固件预配置的**标准路由模式**（LAN `172.16.3.19/24`，见仓库 commit `712949f`） | 刷完后重跑本手册即可 |
 | 分步“保存并应用”网络改动（尤其 WAN 入桥） | 在线桥重建触发交换机转发崩坏，管理失联（附录 A 条目 4） | 本机型走第 9 节一次性脚本 + 重启生效 |
 | WAN 口沿用默认 eth0 conduit | 桥接/路由模式下 WAN 口收方向全死（附录 A 条目 5，openwrt#24696） | 给 wan 设 `conduit 'eth1'`（第 9 节脚本 2b 步已含） |
-| 在 LuCI 设备页编辑/保存过 wan 或 br-lan 设备 | LuCI 设备编辑器没有 conduit 字段，保存时把它**静默洗掉**、留下无名空段——conduit 归一被撤销，WAN 再次不通，且空壳段会干扰后续修复 | conduit 只用第 9 节脚本 2b 步设置（自带空段清理）；设备页只看不动 |
+| 在 LuCI 设备页对 wan 行点了「取消配置 / Unconfigure」（或手动 `uci delete` 了该段） | 整个 wan 设备段被删，conduit 归一随之撤销，WAN 再次不通。注：编辑器「保存」**不会**洗掉 conduit（LuCI 表单逐选项写入、未知字段不动）；接口页删除 wan 接口也不碰设备段（deleteNetwork 只清接口/alias/route/rule/dhcp/防火墙引用） | conduit 段只用第 9 节脚本 2b 步维护（自带空段清理）；设备页对 wan/br-lan 只看不动，绝不点「取消配置」 |
 | 保留配置升级到 61d0fba 时期固件后 `.226` 失联 | 首启 uci-defaults 无条件把已部署 AP 的管理 IP 重置回 `172.16.3.19`（该批脚本不幂等；2026-10-01 已加守卫，新固件不再有） | 先连 `http://172.16.3.19` 找回盒子，再跑第 9 节脚本改回；升级到含守卫的固件即无此问题 |
 | netmask 填 /24 同时又填网关 172.16.3.x | 网关不在链路上，默认路由装不上，盒子自身不出网 | 主网是 /21：掩码 `255.255.248.0`，网关自然 on-link（第 9 节脚本已含） |
 
