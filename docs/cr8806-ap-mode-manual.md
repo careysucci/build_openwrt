@@ -29,8 +29,8 @@
 
 1. **确认接线**：电脑网线接盒子**任意标着 LAN 的网口**（不要接 WAN 口，接了管理页面不通），全程不要拔线。
 2. **查主网三个参数**（在一台能上网的主网电脑上执行 `ipconfig`）：
-   - 主网网关（"默认网关"字段）——**当前现场主网没有 IPv4 网关（PC 无默认路由，疑似靠 IPv6 出网）**，查不到就留空，AP 本身不上网也能正常工作；
-   - 主网 DNS——同上，可留空；
+   - 主网网关（"默认网关"字段）——实测为 `172.16.3.16`（2026-10-01 主网接入后验证：ping 通、DNS 应答正常。09-30 首测时 PC 直连盒子未接主网，曾误判"无 IPv4 网关"）；
+   - 主网 DNS——同网关（`172.16.3.16`），公网备选 `223.5.5.5`；
    - 子网掩码：现场实测主网为 `/21` = `255.255.248.0`。
 3. **确认目标 IP 没被占用**：在电脑上 `ping 172.16.0.226`，应当**不通**（通了说明有设备在用，换一个如 `.227`，后续文档中的 `.226` 同步替换）。
 4. 浏览器打开 `http://172.16.3.19`，用户名 `root`、密码留空，登录。
@@ -86,7 +86,7 @@
    - **IPv4 地址**：`172.16.0.226`
    - **子网掩码**：`255.255.248.0`（/21，与主网一致；**不要**保留默认的 255.255.255.0）
    - **IPv4 网关**：主网网关（查到就填；查不到留空）
-   - **DNS 服务器**：同网关，或 `223.5.5.5`（可留空）
+   - **DNS 服务器**：同网关，或 `223.5.5.5`——**若按第 6 节关闭 dnsmasq，此项必填**（盒子自身解析全靠它；2026-10-01 实测：留空的后果是盒子自己 `ping baidu.com` 报 `bad address`，而客户端上网不受影响）
 2. 「保存并应用」——**页面大概率转圈卡住，这是正常的**：地址已从 `.19` 切到 `.226`，浏览器跟旧地址的会话自然断开。等 30 秒即可，不用重试。
 3. 浏览器打开新地址 **`http://172.16.0.226`**，重新登录（root / 空密码）。
 
@@ -101,6 +101,7 @@
    - 好处②：设备不再"裸奔"在主网上。
 2. **关防火墙**（纯二层 AP 用不到，关掉省内存）：菜单 **系统 → 启动项** → 找到 **firewall** 行 → 「禁用」→「保存并应用」。
 3. **关 dnsmasq**（DHCP 已关，DNS 缓存对 AP 非必需，可留可关；关了更干净）：同页 **dnsmasq** 行 → 「禁用」。
+   - ⚠️ **关它有个连带后果**：dnsmasq 的 init 脚本负责写 `/tmp/resolv.conf`（`/etc/resolv.conf` 指向它）——禁用后该文件空置，**盒子自身的域名解析断路**（`ping baidu.com` 报 `bad address`；不影响客户端上网）。补救：①LAN 接口务必填 DNS（见第 5 节）；②把 `/etc/resolv.conf` 重链到 netifd 的文件：`rm -f /etc/resolv.conf && ln -s /tmp/resolv.conf.d/resolv.conf.auto /etc/resolv.conf`（第 9 节脚本 4/4b 步已含，走那条路可免手工处理）。
 4. **重启一次**：菜单 **系统 → 重启** →「执行重启」。重启后按第 7 节逐项验证，确认配置开机即生效。
 
 ---
@@ -116,6 +117,7 @@
 | 5 | ICMP 刷屏消失 | LuCI → 状态 → 内核日志 | 无 `detected local route` 新增 |
 | 6 | 有线桥接 | 笔记本插 WAN 口（丝印 WAN 的口） | 同样拿到主网 IP、能上网 |
 | 7 | 配置固化 | 重启盒子后重复 1–5 | 全部依旧成立 |
+| 8 | 盒子自身解析（若关了 dnsmasq） | SSH 进盒子 `ping -c2 baidu.com` | 解析域名并通（bad address = 第 5 节 DNS 未填 + resolv.conf 未重链，见第 6 节警告） |
 
 ---
 
@@ -141,10 +143,15 @@ uci delete network.wan
 uci delete network.wan6
 uci set network.lan.ipaddr='172.16.0.226'
 uci set network.lan.netmask='255.255.248.0'
-# 网关/DNS 可选：
-# uci set network.lan.gateway='主网网关'
-# uci add_list network.lan.dns='223.5.5.5'
+# 网关必填（主网实测 172.16.3.16）；DNS 在关闭 dnsmasq 的形态下必填（见第 6 节警告）：
+uci set network.lan.gateway='172.16.3.16'
+uci -q delete network.lan.dns
+uci add_list network.lan.dns='172.16.3.16'
+uci add_list network.lan.dns='223.5.5.5'
 uci commit network
+# dnsmasq 禁用时还需重链 resolv.conf（否则盒子自身解析断路）：
+rm -f /etc/resolv.conf
+ln -s /tmp/resolv.conf.d/resolv.conf.auto /etc/resolv.conf
 
 # ---- 4. 服务与密码 ----
 /etc/init.d/firewall disable
@@ -205,15 +212,23 @@ uci set "$wsec.conduit=eth1"
 uci -q delete network.wan
 uci -q delete network.wan6
 
-# 4) LAN = 172.16.0.226/21（第 5 节等效）
+# 4) LAN = 172.16.0.226/21 + 网关 + DNS（第 5 节等效）
 uci set network.lan.proto='static'
 uci set network.lan.ipaddr='172.16.0.226'
 uci set network.lan.netmask='255.255.248.0'
-uci -q delete network.lan.gateway
+uci set network.lan.gateway='172.16.3.16'
+# DNS（必填！第 5 步会关 dnsmasq，盒子自身解析全靠这两行；delete+add 保证幂等）
 uci -q delete network.lan.dns
-# 主网查到网关的话解开下一行：
-# uci set network.lan.gateway='172.16.0.1'
+uci add_list network.lan.dns='172.16.3.16'
+uci add_list network.lan.dns='223.5.5.5'
+uci set network.lan.peerdns='0'
 uci commit network
+
+# 4b) 盒子自身解析链修复（关键！dnsmasq 一禁，/tmp/resolv.conf 无人写 → 空文件，
+#     /etc/resolv.conf 指着它就是死路——ping 域名报 bad address，但客户端上网不受影响。
+#     重链到 netifd 的 resolv.conf.auto：重启后 netifd 按上面 lan.dns 自动填它）
+rm -f /etc/resolv.conf
+ln -s /tmp/resolv.conf.d/resolv.conf.auto /etc/resolv.conf
 
 # 5) 纯 AP 用不到的服务禁自启（第 6 节等效）
 /etc/init.d/firewall disable
@@ -232,7 +247,7 @@ fw_setenv flag_ota_reboot 0
 reboot
 ```
 
-**重启后**：等约 2 分钟，浏览器访问 **`http://172.16.0.226`**（root / 第 2 步所设密码），按第 7 节清单逐项验证。conduit 生效的内核级证据：`ls /sys/class/net/wan/` 里出现 `lower_eth1`（默认 eth0 时是 `lower_eth0`）。若 3 分钟后 IPv4 仍不可达，**别反复软重启**——本次同时改了桥成员和 conduit，`reboot` 也会概率性触发交换机数据面挂死（附录 A 条目 4 的 2026-10-01 补充），直接拔电 ≥10 秒冷启动。
+**重启后**：等约 2 分钟，浏览器访问 **`http://172.16.0.226`**（root / 第 2 步所设密码），按第 7 节清单逐项验证。conduit 生效的内核级证据：`ls /sys/class/net/wan/` 里出现 `lower_eth1`（默认 eth0 时是 `lower_eth0`）。若 3 分钟后 IPv4 仍不可达，**别反复软重启**——本次同时改了桥成员和 conduit，`reboot` 也会概率性触发交换机数据面挂死（附录 A 条目 4 的 2026-10-01 补充），直接拔电 ≥10 秒冷启动。盒子自身的域名解析验证：SSH 进盒子 `ping -c2 baidu.com` 应通（前提是 4/4b 步的 DNS 与 resolv.conf 重链已执行）。
 
 ---
 
@@ -278,6 +293,7 @@ reboot
 | WAN 口沿用默认 eth0 conduit | 桥接/路由模式下 WAN 口收方向全死（附录 A 条目 5，openwrt#24696） | 给 wan 设 `conduit 'eth1'`（第 9 节脚本 2b 步已含） |
 | 在 LuCI 设备页对 wan 行点了「取消配置 / Unconfigure」（或手动 `uci delete` 了该段） | 整个 wan 设备段被删，conduit 归一随之撤销，WAN 再次不通。注：编辑器「保存」**不会**洗掉 conduit（LuCI 表单逐选项写入、未知字段不动）；接口页删除 wan 接口也不碰设备段（deleteNetwork 只清接口/alias/route/rule/dhcp/防火墙引用） | conduit 段只用第 9 节脚本 2b 步维护（自带空段清理）；设备页对 wan/br-lan 只看不动，绝不点「取消配置」 |
 | 保留配置升级到 61d0fba 时期固件后 `.226` 失联 | 首启 uci-defaults 无条件把已部署 AP 的管理 IP 重置回 `172.16.3.19`（该批脚本不幂等；2026-10-01 已加守卫，新固件不再有） | 先连 `http://172.16.3.19` 找回盒子，再跑第 9 节脚本改回；升级到含守卫的固件即无此问题 |
+| AP 上关了 dnsmasq 但没设 lan DNS / 没重链 resolv.conf | 盒子自身 `ping 域名` 报 bad address（IP 直 ping 是通的，客户端上网不受影响）——`/tmp/resolv.conf` 由 dnsmasq init 负责写，禁用后空置 | 第 9 节脚本 4/4b 步已含：`network.lan.dns` 两个上游 + `/etc/resolv.conf` 重链到 `/tmp/resolv.conf.d/resolv.conf.auto` |
 | netmask 填 /24 同时又填网关 172.16.3.x | 网关不在链路上，默认路由装不上，盒子自身不出网 | 主网是 /21：掩码 `255.255.248.0`，网关自然 on-link（第 9 节脚本已含） |
 
 ## 附录 C：`icmp: detected local route ...` 日志的完整解释
