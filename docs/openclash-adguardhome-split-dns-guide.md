@@ -392,8 +392,9 @@ CONFIG_TARGET_KERNEL_PARTSIZE=256
 | `config_path` | `/etc/openclash/config/clash-all-noicon-clash.yaml` | 指定使用我们的 yaml |
 | `operation_mode` | `redir-host` | 配合 AdGuardHome 广告过滤 |
 | `china_ip_route` | `1` | nftables 层 bypass 国内 IP → 内核直转线速 |
+| `china_ip6_route` | `1` | 同上（IPv6）：CN v6 在 mangle_v6 链 RETURN 内核直转，国外 v6 照常走代理（无泄露，实测验证） |
 | `enable_redirect_dns` | `1` | 劫持所有 53 流量到 Clash DNS |
-| `dnsmasq_noresolv` | `1` | 禁止 dnsmasq 查 ISP DNS |
+| `dnsmasq_noresolv` | `1` | 禁止 dnsmasq 查 ISP DNS（实为接管状态字段；真实防护在 dhcp 层 noresolv，由 watchdog 守护） |
 | `skip_proxy_address` | `0` | 禁止自动 bypass DNS 服务器 IP |
 | `bypass_gateway_compatible` | `0` | 关闭网关兼容（避免自动 bypass .6） |
 | `enable_respect_rules` | `0` | 关闭（.6 流量已由 nftables + SRC-IP-CIDR 保护） |
@@ -846,6 +847,7 @@ done
 | 代理节点DNS | 含.6或境外DNS | 仅 `172.16.3.7` | 内网直达打破循环 |
 | IPv6 | block所有 | 开启IPv6代理 | 国内IPv6直连+国外走代理 |
 | China IP | 经Clash用户态 | `china_ip_route=1` | nftables层bypass→2000Mbps |
+| China IPv6 | v6全进用户态 | `china_ip6_route=1` | CN v6内核直转，国外v6不受影响 |
 
 ---
 
@@ -899,8 +901,9 @@ uci show openclash
 nft list chain inet fw4 openclash_mangle
 nft list chain inet fw4 openclash_mangle_v6
 
-# 查看 china_ip bypass set 条目数
+# 查看 china_ip (v4/v6) bypass set 条目数
 nft list set inet fw4 openclash_cn_ip | wc -l
+nft list set inet fw4 china_ip6_route | wc -l
 
 # 手动更新订阅（OpenClash运行中）
 curl -X PUT "http://127.0.0.1:9090/providers/proxies/cc-auto" \

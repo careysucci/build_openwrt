@@ -64,8 +64,12 @@ uci set openclash.config.enable_redirect_dns='1'
 uci set openclash.config.redirect_dns='1'
 
 # Prevent dnsmasq from also querying ISP DNS (resolv.conf.auto contains ISP servers).
-# When noresolv=1, dnsmasq ONLY uses the server set by OpenClash (127.0.0.1#7874),
-# guaranteeing all queries flow: client → dnsmasq → Clash DNS → .7/.6 AdGuardHome.
+# NOTE (verified on live router, 2026-10): in current OpenClash this UCI key is a
+# takeover/status field — /etc/init.d/openclash:255 reads it at start, :195
+# back-fills it from dhcp. The effective guard is dhcp.@dnsmasq[0].noresolv='1'
+# + list server '127.0.0.1#7874', written by the redirect-dns takeover and
+# enforced every 30s by openclash_watchdog.sh. Keeping '1' keeps UCI state
+# aligned; queries always flow: client → dnsmasq → Clash DNS → .7/.6 AdGuardHome.
 uci set openclash.config.dnsmasq_noresolv='1'
 
 # ── Router self proxy ─────────────────────────────────────────
@@ -85,6 +89,17 @@ uci set openclash.config.router_self_proxy='1'
     # Chinese speedtest/download traffic never enters Clash process.
     uci set openclash.config.china_ip_route='1'
 
+    # --- China IPv6 bypass (aligned with china_ip_route) ──────────
+    # Inserts `ip6 daddr @china_ip6_route return` into openclash_mangle_v6:
+    # CN-destined v6 skips the mihomo userspace hop, same as v4. Foreign v6
+    # (not in set) still tproxies into mihomo → proxy; DNS path unchanged.
+    # Leak analysis (verified on live router 2026-10): CN v6 outbound is
+    # already DIRECT per yaml rules, so only the userspace hop is removed —
+    # no new exposure. The set is loaded even when this is '0' if
+    # disable_udp_quic='1' (QUIC reject references it), so enabling adds
+    # no extra maintenance cost.
+    uci set openclash.config.china_ip6_route='1'
+
     # --- Bypass LAN (performance) ─────────────────────────────────
     # skip_proxy_address=0: DISABLE automatic address bypass.
     # When enabled, OpenClash may add nftables bypass rules for DNS server IPs
@@ -101,6 +116,8 @@ uci set openclash.config.stack_type='system'
 # ── Core: Meta (mihomo) ───────────────────────────────────────
 # linux-amd64-v1 = compatible build (broadest x86_64 support,
 # works without SSE4.2/AVX2; covers Intel 4th gen and all modern AMD).
+# The actual VM (PVE, i3-8100T = Haswell) supports AVX2 — switching to
+# linux-amd64-v3 via OpenClash UI (版本更新) is a safe optional upgrade.
 uci set openclash.config.core_type='Meta'
 uci set openclash.config.core_version='linux-amd64-v1'
 
