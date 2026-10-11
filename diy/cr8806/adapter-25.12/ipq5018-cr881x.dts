@@ -1,0 +1,472 @@
+// SPDX-License-Identifier: (GPL-2.0+)
+/*
+ * Xiaomi CR881x series (CR8816 / CR8818 / CR8819 - carrier-custom siblings
+ * of the Redmi AX3000 family; NOT flashable with CR880X images!)
+ *
+ * Hardware:
+ *   - IPQ5018 (2x Cortex-A53) with internal GE PHY + 2.4G WiFi
+ *   - Motorcomm YT9215 switch: LAN1-3 + WAN on PHY0-3, CPU port 8 via
+ *     SGMII to MAC1; external MDIO (mdio1) address 0x1d, reset GPIO 39
+ *   - QCN6122 5G WiFi (PCIE1, reset GPIO 18)
+ *   - SPI NAND 128MB, 256MB RAM
+ *
+ * Same IPQ5018 SoC as the CR880X but a completely different switch
+ * (Motorcomm YT9215 DSA vs Qualcomm QCA8337 DSA): a CR880X image boots
+ * on a CR881x but no ethernet port ever comes up - the board wiring is
+ * incompatible (CR880X: dual conduit via QCA8337 SGMII + PHY-to-PHY;
+ * CR881x: single conduit, CPU port 8 only).
+ *
+ * Structure follows zcop/immortalwrt openwrt-25.12 ipq5018-cr881x.dts
+ * (field-verified by the community), reworked to this tree's proven
+ * 25.12 conventions:
+ *   - qcom,smem-part partitioning: the 6.12 kernel parses Xiaomi SMEM
+ *     names lower-case ("0:art", "0:appsblenv"...), matching the
+ *     caldata / uboot-envtools scripts (verified on CR8806)
+ *   - explicit board clocks: sleep_clk 32000 + xo_board_clk div 4 -
+ *     without them the clock chain breaks, the watchdog loses its
+ *     input clock and cpufreq-dt fails to register (seen on CR8806,
+ *     kernel 6.12.108)
+ *   - 25.12-style LED function/color naming
+ */
+
+/dts-v1/;
+
+#include "ipq5018.dtsi"
+#include "ipq5018-ess.dtsi"
+#include "ipq5018-qcn6122.dtsi"
+
+#include <dt-bindings/net/qcom-ipq-ess.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	model = "Xiaomi CR881x";
+	compatible = "xiaomi,cr881x", "qcom,ipq5018";
+
+	aliases {
+		label-mac-device = &dp1;
+		serial0 = &blsp1_uart1;
+
+		ethernet0 = &dp1;
+		ethernet1 = &dp2;
+
+		led-boot = &led_system_blue;
+		led-failsafe = &led_system_red;
+		led-running = &led_system_blue;
+		led-upgrade = &led_system_red;
+	};
+
+	chosen {
+		/* Override the root parameter from u-boot;
+		 * increase coherent_pool size for WiFi */
+		bootargs-append = " root=/dev/ubiblock0_1 coherent_pool=2M";
+		stdout-path = "serial0:115200n8";
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&button_pins>;
+		pinctrl-names = "default";
+
+		button-0 {
+			label = "reset";
+			gpios = <&tlmm 38 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+			debounce-interval = <60>;
+		};
+
+		button-1 {
+			label = "mesh";
+			gpios = <&tlmm 28 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_WPS_BUTTON>;
+			debounce-interval = <60>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-0 = <&led_pins>;
+		pinctrl-names = "default";
+
+		led_system_blue: led-0 {
+			gpios = <&tlmm 24 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_BLUE>;
+			function = LED_FUNCTION_STATUS;
+			default-state = "on";
+		};
+
+		led_system_red: led-1 {
+			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_STATUS;
+		};
+
+		led_internet_blue: led-2 {
+			gpios = <&tlmm 26 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_BLUE>;
+			function = LED_FUNCTION_WAN;
+		};
+
+		led_internet_red: led-3 {
+			gpios = <&tlmm 27 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_WAN;
+		};
+	};
+};
+
+&blsp1_uart1 {
+	pinctrl-0 = <&serial_0_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&prng {
+	status = "okay";
+};
+
+&qpic_bam {
+	status = "okay";
+};
+
+&qpic_nand {
+	pinctrl-0 = <&qpic_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	nand@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+
+		nand-ecc-engine = <&qpic_nand>;
+		/* Same 2K/64B NAND family as CR880X: strength=8 breaks NAND
+		 * I/O on qpic-snand, use 4 instead (verified on CR8806;
+		 * matches the ECC layout written by the stock U-boot
+		 * flasher - upstream iodata,wn-dax3000gr does the same). */
+		nand-ecc-strength = <4>;
+		nand-ecc-step-size = <512>;
+		nand-bus-width = <8>;
+
+		partitions {
+			compatible = "qcom,smem-part";
+		};
+	};
+};
+
+&tsens {
+	status = "okay";
+};
+
+/*
+ * ===================================================================
+ *     _______________________         _______________________
+ *    |        IPQ5018        |       |        YT9215        |
+ *    | +------+  +--------+ |       | +------+   +------+  |
+ *    | | MAC0 |--| GE Phy |-+--UTP--+-| Phy4 |---| MAC4 |  |
+ *    | +------+  +--------+ |       | +------+   +------+  |
+ *    | +------+  +--------+ |       | (PHY-to-PHY, unused   |
+ *    | | MAC1 |--| Uniphy |-+-SGMII-+-| by DSA; MAC8 = CPU) |
+ *    | +------+  +--------+ |       |_______________________|
+ *    |_______________________|        external mdio1 @ 0x1d
+ *
+ * LAN1/LAN2/LAN3 = YT9215 PHY0/1/2, WAN = PHY3. All user traffic is
+ * switched through MAC8 -> SGMII -> MAC1 (dp2/eth1, single conduit).
+ * ===================================================================
+ */
+
+&switch {
+	status = "okay";
+
+	/* MAC0 -> GE PHY (PHY-to-PHY link to YT9215 PHY4)
+	 * MAC1 -> SGMII channel 0 -> YT9215 CPU port 8
+	 *
+	 * TODO: the YT9215 supports 2500base-x over the SGMII+ link
+	 * (MAC_MODE_SGMII_PLUS; hzyitc 5.15 runs it at 2500, matching the
+	 * stock firmware DT). Kept at 1 GbE to match the field-verified
+	 * zcop configuration for first bring-up. */
+	switch_mac_mode = <MAC_MODE_SGMII_CHANNEL0>;
+	switch_mac_mode1 = <MAC_MODE_DISABLED>;
+	switch_mac_mode2 = <MAC_MODE_DISABLED>;
+
+	/* ESS port bitmaps (match MAC0/MAC1 usage in qcom,port_phyinfo;
+	 * single conduit DSA on dp2 - zcop verified) */
+	switch_cpu_bmp = <ESS_PORT0>;
+	switch_wan_bmp = <ESS_PORT1>;
+	switch_lan_bmp = <ESS_PORT2>;
+	switch_inner_bmp = <ESS_PORT7>;
+
+	qcom,port_phyinfo {
+		// MAC0 -> GE Phy --- YT9215 Phy4 (PHY-to-PHY)
+		port@0 {
+			port_id = <1>;
+			mdiobus = <&mdio0>;
+			phy_address = <7>;
+			phy_dac = <0x10 0x10>;
+		};
+
+		// MAC1 -> Uniphy --- SGMII --- YT9215 Phy8
+		port@1 {
+			port_id = <2>;
+			forced-speed = <1000>;
+			forced-duplex = <1>;
+		};
+	};
+};
+
+// MAC0 -> GE PHY (PHY-to-PHY link to YT9215 PHY4; not used by DSA)
+&dp1 {
+	status = "okay";
+};
+
+// MAC1 ---SGMII---> YT9215 CPU port (single DSA conduit: eth1)
+&dp2 {
+	status = "okay";
+	phy-mode = "sgmii";
+
+	fixed-link {
+		speed = <1000>;
+		full-duplex;
+		pause;
+		asym-pause;
+	};
+};
+
+&mdio0 {
+	status = "okay";
+};
+
+// IPQ5018 GE Phy -> YT9215 Phy4
+&ge_phy {
+	status = "okay";
+	qcom,dac-preset-short-cable;
+};
+
+&mdio1 {
+	pinctrl-0 = <&mdio1_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	// Motorcomm YT9215 switch
+	ethernet-switch@1d {
+		compatible = "motorcomm,yt9215";
+		reg = <0x1d>;
+
+		reset-gpios = <&tlmm 39 GPIO_ACTIVE_LOW>;
+		reset-assert-us = <10000>; /* 10 ms */
+		reset-deassert-us = <50000>; /* 50 ms */
+
+		mdio {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			sw_phy0: phy@0 {
+				reg = <0>;
+			};
+
+			sw_phy1: phy@1 {
+				reg = <1>;
+			};
+
+			sw_phy2: phy@2 {
+				reg = <2>;
+			};
+
+			sw_phy3: phy@3 {
+				reg = <3>;
+			};
+
+			sw_phy4: phy@4 {
+				reg = <4>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			// MAC0 -> Phy0 -> LAN1
+			port@0 {
+				reg = <0>;
+				label = "lan1";
+				phy-mode = "internal";
+				phy-handle = <&sw_phy0>;
+			};
+
+			// MAC1 -> Phy1 -> LAN2
+			port@1 {
+				reg = <1>;
+				label = "lan2";
+				phy-mode = "internal";
+				phy-handle = <&sw_phy1>;
+			};
+
+			// MAC2 -> Phy2 -> LAN3
+			port@2 {
+				reg = <2>;
+				label = "lan3";
+				phy-mode = "internal";
+				phy-handle = <&sw_phy2>;
+			};
+
+			// MAC3 -> Phy3 -> WAN
+			port@3 {
+				reg = <3>;
+				label = "wan";
+				phy-mode = "internal";
+				phy-handle = <&sw_phy3>;
+			};
+
+			// MAC4 -> Phy4 -> IPQ5018 GE Phy
+			// (PHY-to-PHY link, unused by DSA; keeps PHY4 managed)
+			port@4 {
+				reg = <4>;
+				label = "cpu";
+				phy-mode = "internal";
+				phy-handle = <&sw_phy4>;
+			};
+
+			// MAC8 ---SGMII---> IPQ5018 MAC1 (CPU: eth1)
+			port@8 {
+				reg = <8>;
+				phy-mode = "sgmii";
+				ethernet = <&dp2>;
+
+				fixed-link {
+					speed = <1000>;
+					full-duplex;
+					pause;
+					asym-pause;
+				};
+			};
+		};
+	};
+};
+
+&tlmm {
+	serial_0_pins: serial-0-state {
+		pins = "gpio20", "gpio21";
+		function = "blsp0_uart0";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	qpic_pins: qpic-state {
+		clock-pins {
+			pins = "gpio9";
+			function = "qspi_clk";
+			drive-strength = <8>;
+			bias-disable;
+		}
+
+		cs-pins {
+			pins = "gpio8";
+			function = "qspi_cs";
+			drive-strength = <8>;
+			bias-disable;
+		}
+
+		data-pins {
+			pins = "gpio4", "gpio5", "gpio6", "gpio7";
+			function = "qspi_data";
+			drive-strength = <8>;
+			bias-disable;
+		}
+	};
+
+	mdio1_pins: mdio1-state {
+		mdc-pins {
+			pins = "gpio36";
+			function = "mdc";
+			drive-strength = <8>;
+			bias-pull-up;
+		}
+
+		mdio-pins {
+			pins = "gpio37";
+			function = "mdio";
+			drive-strength = <8>;
+			bias-pull-up;
+		}
+	};
+
+	led_pins: led-state {
+		pins = "gpio24", "gpio25", "gpio26", "gpio27";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-down;
+	};
+
+	button_pins: button-state {
+		pins = "gpio28", "gpio38";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+};
+
+&q6v5_wcss {
+	status = "okay";
+
+	memory-region = <&q6_region>;
+	firmware-name = "ath11k/IPQ5018/hw1.0/q6_fw.mdt",
+			"ath11k/IPQ5018/hw1.0/m3_fw.mdt",
+			"ath11k/QCN6122/hw1.0/m3_fw.mdt";
+
+	/* The QCN6122 radio should map to UPD ID 2 */
+	boot-args = <
+		/*       type: */	0x2	/* PCIE1 */
+		/*     length: */	4
+		/*     UPD ID: */	2
+		/* reset GPIO: */	18
+		/*   reserved: */	0 0>;
+};
+
+/* Board clock frequencies — the dtsi only declares the fixed/factor clocks.
+ * Without these the whole clock chain breaks: watchdog loses its input
+ * clock and cpufreq-dt fails to register (seen on-device, 6.12.108).
+ * Same values as upstream ipq5018-gl-b3000. */
+&sleep_clk {
+	clock-frequency = <32000>;
+};
+
+&xo_board_clk {
+	clock-div = <4>;
+	clock-mult = <1>;
+};
+
+&wifi {
+	// IPQ5018 2.4G
+	status = "okay";
+
+	qcom,rproc = <&q6_wcss_pd1>;
+
+	// Static board id 0x23 - matched by the static BDF shipped in
+	// ipq-wifi-xiaomi_cr881x (unlike CR880X, no per-unit board-id
+	// hotplug override is needed: qmi-board-id=35 hits the BDF entry).
+	qcom,board_id = <0x23>;
+	qcom,ath11k-calibration-variant = "Xiaomi-CR8818";
+
+	qcom,ath11k-fw-memory-mode = <1>;
+	qcom,bdf-addr = <0x4c400000>;
+};
+
+&wifi1 {
+	// QCN6122 5G
+	status = "okay";
+
+	qcom,rproc = <&q6_wcss_pd2>;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
+
+	// Static board id 0x60 - matched by the static BDF shipped in
+	// ipq-wifi-xiaomi_cr881x (qmi-board-id=96); the per-unit RF
+	// calibration still comes from ART via 11-ath11k-caldata, and
+	// 12-ath11k-qcn6122-bdf is a no-op here (static board-2.bin
+	// exists, its first check short-circuits).
+	qcom,board_id = <0x60>;
+	qcom,ath11k-calibration-variant = "Xiaomi-CR8818";
+
+	qcom,ath11k-fw-memory-mode = <1>;
+	qcom,bdf-addr = <0x4d100000>;
+	qcom,m3-dump-addr = <0x4df00000>;
+};

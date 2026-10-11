@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""In-place modifications for Redmi AX3000 / CR880X on official OpenWrt /
-ImmortalWrt openwrt-25.12.
+"""In-place modifications for Redmi AX3000 / CR880X and Xiaomi CR881x on
+official OpenWrt / ImmortalWrt openwrt-25.12.
 
 Every edit is anchored on an exact string from the upstream file; the script
 fails loudly (exit 1) if an anchor is missing so upstream drift is detected at
@@ -76,13 +76,43 @@ define Device/redmi_ax3000
 	IMAGE/factory.img := append-ubi
 endef
 TARGET_DEVICES += redmi_ax3000
+
+define Device/xiaomi_cr881x
+	$(call Device/FitImage)
+	$(call Device/UbiFit)
+	SOC := ipq5018
+	DEVICE_VENDOR := Xiaomi
+	DEVICE_MODEL := CR881x
+	# CR8816 / CR8818 / CR8819: carrier-custom siblings with a Motorcomm
+	# YT9215 switch (CR880X images must NOT be flashed on these!)
+	DEVICE_ALT0_VENDOR := Xiaomi
+	DEVICE_ALT0_MODEL := CR8816
+	DEVICE_ALT1_VENDOR := Xiaomi
+	DEVICE_ALT1_MODEL := CR8818
+	DEVICE_ALT2_VENDOR := Xiaomi
+	DEVICE_ALT2_MODEL := CR8819
+	BLOCKSIZE := 128k
+	PAGESIZE := 2048
+	NAND_SIZE := 128m
+	DEVICE_DTS_CONFIG := config@mp03.3
+	# Same dual-slot upgrade path as redmi_ax3000 (mi_dualboot.sh +
+	# uboot_env); static BDFs match the DT board_id directly, so no
+	# per-unit board-id override is needed.
+	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-xiaomi_cr881x uboot-envtools
+	IMAGES += factory.img
+	IMAGE/factory.img := append-ubi
+endef
+TARGET_DEVICES += xiaomi_cr881x
 """,
         "append",
     )],
 )
 
-# 2. Default network config (LAN1-3 via SGMII conduit eth1, WAN via GE PHY
-#    conduit eth0 - the PHY-to-PHY link through QCA8337 port 5) --------------
+# 2. Default network config ---------------------------------------------------
+#    CR880X: LAN1-3 via SGMII conduit eth1, WAN via GE PHY conduit eth0
+#    (the PHY-to-PHY link through QCA8337 port 5).
+#    CR881x: single-conduit DSA (everything via YT9215 CPU port 8 -> eth1),
+#    no conduit wiring needed.
 patch_file(
     "target/linux/qualcommax/ipq50xx/base-files/etc/board.d/02_network",
     "redmi,ax3000",
@@ -94,6 +124,9 @@ patch_file(
         '\t\tucidef_set_network_device_conduit "lan2" "eth1"\n'
         '\t\tucidef_set_network_device_conduit "lan3" "eth1"\n'
         '\t\tucidef_set_network_device_conduit "wan" "eth0"\n'
+        "\t\t;;\n"
+        "\txiaomi,cr881x)\n"
+        '\t\tucidef_set_interfaces_lan_wan "lan1 lan2 lan3" "wan"\n'
         "\t\t;;\n",
         "after",
     )],
@@ -108,14 +141,16 @@ patch_file(
     [
         (
             '"ath11k/IPQ5018/hw1.0/cal-ahb-c000000.wifi.bin")\n\tcase "$board" in\n',
-            "\tredmi,ax3000)\n"
+            "\tredmi,ax3000|\n"
+            "\t\txiaomi,cr881x)\n"
             '\t\tcaldata_extract "0:art" 0x1000 0x20000\n'
             "\t\t;;\n",
             "after",
         ),
         (
             '"ath11k/QCN6122/hw1.0/cal-ahb-b00a040.wifi.bin")\n\tcase "$board" in\n',
-            "\tredmi,ax3000)\n"
+            "\tredmi,ax3000|\n"
+            "\t\txiaomi,cr881x)\n"
             '\t\tcaldata_extract "0:art" 0x26800 0x20000\n'
             "\t\t;;\n",
             "after",
@@ -129,7 +164,8 @@ patch_file(
     "mi_dualboot_do_upgrade",
     [(
         'platform_do_upgrade() {\n\tcase "$(board_name)" in\n',
-        "\tredmi,ax3000)\n"
+        "\tredmi,ax3000|\n"
+        "\t\txiaomi,cr881x)\n"
         '\t\tmi_dualboot_do_upgrade "$1"\n'
         "\t\t;;\n",
         "after",
@@ -142,7 +178,8 @@ patch_file(
     "redmi,ax3000",
     [(
         'case "$board" in\n',
-        "redmi,ax3000)\n"
+        "redmi,ax3000|\n"
+        "\txiaomi,cr881x)\n"
         '\tubootenv_add_mtd "0:appsblenv" "0x0" "0x10000" "0x20000"\n'
         "\t;;\n",
         "after",
@@ -156,15 +193,32 @@ patch_file(
     [
         (
             "\tqnap_301w \\\n",
-            "\tredmi_ax3000 \\\n",
+            "\tredmi_ax3000 \\\n"
+            "\txiaomi_cr881x \\\n",
             "after",
         ),
         (
             "$(eval $(call generate-ipq-wifi-package,qnap_301w,QNAP 301w))\n",
-            "$(eval $(call generate-ipq-wifi-package,redmi_ax3000,Redmi AX3000))\n",
+            "$(eval $(call generate-ipq-wifi-package,redmi_ax3000,Redmi AX3000))\n"
+            "$(eval $(call generate-ipq-wifi-package,xiaomi_cr881x,Xiaomi CR881x))\n",
             "after",
         ),
     ],
+)
+
+# 7. Kernel config: enable the YT921x DSA driver (CR881x switch) -------------
+# The driver itself is installed by apply-cr8806.sh from patches-kernel/
+# (0913 tag + 0914 driver + 0915 REVSGMII hack); this switches it on for the
+# whole ipq50xx subtarget (harmless on QCA8337 boards, required on CR881x).
+patch_file(
+    "target/linux/qualcommax/ipq50xx/config-default",
+    "NET_DSA_YT921X",
+    [(
+        "CONFIG_NET_DSA=y\n",
+        "CONFIG_NET_DSA_YT921X=y\n"
+        "CONFIG_NET_DSA_TAG_YT921X=y\n",
+        "after",
+    )],
 )
 
 if FAILURES:

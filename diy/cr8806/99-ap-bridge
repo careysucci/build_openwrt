@@ -1,11 +1,13 @@
 #!/bin/sh
 # =============================================================
 # uci-defaults: 99-ap-bridge
-# Target: Xiaomi CR8806 / Redmi AX3000 — ImmortalWrt 25.12 router build
+# Target: Xiaomi CR8806 / Redmi AX3000 + Xiaomi CR881x (CR8816/8818/8819)
+#         — ImmortalWrt 25.12 router build (one build, two device images)
 #
 # [Filename kept for continuity] This script NO LONGER configures
 # bridged-AP mode: the image boots as a STANDARD ROUTER — LAN pinned to
-# 172.16.3.19/24 (the management address of this deployment), DHCP
+# the per-board management address (CR880X: 172.16.3.19, CR881x:
+# 172.16.0.248), DHCP
 # server, firewall and routed WAN (DHCP client or PPPoE, both work out
 # of the box). It only brands the box and provisions the WiFi below.
 # Converting to a bridged AP is a manual on-device step (recipe in this
@@ -33,14 +35,17 @@
 # timeout it exits 1 so it is retried on the next boot.
 #
 # What it does (everything else stays STOCK router defaults):
-#   1. LAN pinned to the deployment management address 172.16.3.19/24 —
+#   1. LAN pinned to the per-board management address (CR880X:
+#      172.16.3.19, CR881x: 172.16.0.248) —
 #      ONLY on a factory-fresh config; a settings-kept sysupgrade of an
 #      already-deployed box (e.g. one converted to a bridged AP with its
 #      own management IP) keeps its address untouched
-#   2. WAN port conduit unified to eth1 — the stock eth0 conduit
-#      (GMAC0 PHY-to-PHY into QCA8337 port 5) has no working RX on
-#      mainline qca8k (openwrt#24696); without it the routed WAN DHCP
-#      client never hears a reply (verified on-device 2026-09-30)
+#   2. WAN port conduit unified to eth1 — CR880X ONLY: the stock eth0
+#      conduit (GMAC0 PHY-to-PHY into QCA8337 port 5) has no working RX
+#      on mainline qca8k (openwrt#24696); without it the routed WAN DHCP
+#      client never hears a reply (verified on-device 2026-09-30).
+#      The CR881x (YT9215) is single-conduit — wan already rides eth1
+#      via the switch CPU port, nothing to override
 #   3. System: hostname, timezone, LuCI language
 #   4. packet_steering=1: RX softirqs spread over both A53 cores
 #   5. Enables dual-band WiFi, same SSID on both bands:
@@ -62,7 +67,7 @@
 #      - disassoc_low_ack=0: don't kick weak-signal IoT clients
 #
 # Multi-AP roaming (valid once the boxes are converted to bridge mode):
-# flashing every CR8806 with this same firmware gives them identical
+# flashing every box (CR880X and CR881x alike) with this same firmware gives them identical
 # SSID/password/mobility-domain — clients roam seamlessly over the
 # Ethernet backhaul. For wireless mesh instead, add an 802.11s interface
 # in LuCI (wpad-openssl already supports SAE mesh).
@@ -70,9 +75,16 @@
 
 echo "[99-ap-bridge] provisioning router-mode branding + WiFi..."
 
+# Board dispatch: the CR881x (YT9215 switch sibling) gets its own
+# management address; the CR880X-only WAN conduit workaround below
+# keys off the same variable.
+board="$(cat /tmp/sysinfo/board_name 2>/dev/null)"
+lan_ip='172.16.3.19'
+[ "$board" = "xiaomi,cr881x" ] && lan_ip='172.16.0.248'
+
 # ---- 1. Network: fixed management IP + packet steering ---------------
-# LAN is pinned to 172.16.3.19/24 — the management address of this
-# deployment. config_generate wrote stock 192.168.1.1/24 during preinit;
+# LAN is pinned to the board's management address (CR880X 172.16.3.19,
+# CR881x 172.16.0.248). config_generate wrote stock 192.168.1.1/24 during preinit;
 # this overrides it from uci_apply_defaults (START=10), which runs BEFORE
 # netifd (START=20) first starts — so the box comes up reachable at .19
 # on first boot, no window where it answers at 192.168.1.1. DHCP server,
@@ -97,28 +109,32 @@ echo "[99-ap-bridge] provisioning router-mode branding + WiFi..."
 lan_cur_ip="$(uci -q get network.lan.ipaddr)"
 if [ -z "$lan_cur_ip" ] || [ "$lan_cur_ip" = "192.168.1.1" ]; then
     uci set network.lan.proto='static'
-    uci set network.lan.ipaddr='172.16.3.19'
+    uci set network.lan.ipaddr="$lan_ip"
     uci set network.lan.netmask='255.255.255.0'
 else
     echo "[99-ap-bridge] lan already at $lan_cur_ip — keeping it (settings-kept upgrade)"
 fi
 uci set network.globals.packet_steering='1'
-# WAN conduit -> eth1: the wan port ships on conduit eth0 (GMAC0
-# PHY-to-PHY into QCA8337 port 5) and that path has NO working RX on
-# the mainline qca8k driver (openwrt#24696, same wiring as the Redmi
-# AX5400; dmesg: adpt_mp_port_netdev_change_notify "incorrect port 0").
-# Without this override the routed WAN DHCP client never receives a
-# reply, and a bridged wan port passes no traffic (both verified
-# on-device 2026-09-30; fix evidence: /sys/class/net/wan/lower_eth1).
+# WAN conduit -> eth1: CR880X ONLY. On the CR880X the wan port ships on
+# conduit eth0 (GMAC0 PHY-to-PHY into QCA8337 port 5) and that path has
+# NO working RX on the mainline qca8k driver (openwrt#24696, same wiring
+# as the Redmi AX5400; dmesg: adpt_mp_port_netdev_change_notify
+# "incorrect port 0"). Without this override the routed WAN DHCP client
+# never receives a reply, and a bridged wan port passes no traffic (both
+# verified on-device 2026-09-30; fix evidence: /sys/class/net/wan/lower_eth1).
+# The CR881x (YT9215) is a single-conduit design — wan already rides
+# eth1 through the switch CPU port, nothing to override.
 # A `config device` section naming wan overrides board.json's
 # network_device.wan.conduit; reuse an existing section if one exists
 # (two sections for one device are not an option). Runs before netifd
 # (START=20) first starts, so first boot already comes up with a
 # working WAN port.
-wsec="$(uci show network 2>/dev/null | sed -n "s/^\(network\.[^=]*\)\.name='wan'$/\1/p" | head -n1)"
-[ -n "$wsec" ] || wsec="$(uci add network device)"
-uci set "$wsec.name=wan"
-uci set "$wsec.conduit=eth1"
+if [ "$board" != "xiaomi,cr881x" ]; then
+    wsec="$(uci show network 2>/dev/null | sed -n "s/^\(network\.[^=]*\)\.name='wan'$/\1/p" | head -n1)"
+    [ -n "$wsec" ] || wsec="$(uci add network device)"
+    uci set "$wsec.name=wan"
+    uci set "$wsec.conduit=eth1"
+fi
 uci commit network
 
 # ---- 2. System ------------------------------------------------------

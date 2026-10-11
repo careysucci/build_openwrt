@@ -1,6 +1,6 @@
 #!/bin/sh /etc/rc.common
-# Redmi AX3000 / CR880X: confirm successful boot to the bootloader
-# (dual partition scheme: rootfs / rootfs_1 with ota flags).
+# Redmi AX3000 / CR880X + Xiaomi CR881x: confirm successful boot to the
+# bootloader (dual partition scheme: rootfs / rootfs_1 with ota flags).
 #
 # CR8806 vendor U-Boot (measured on-device 2026-09-29): flag_boot_rootfs
 # selects the boot partition and the bootloader pre-arms the
@@ -19,7 +19,7 @@ START=99
 
 boot() {
 	case $(board_name) in
-	redmi,ax3000)
+	redmi,ax3000|xiaomi,cr881x)
 		fw_printenv >/dev/null || return 0
 
 		local mtd="$(grep -oE 'ubi.mtd=[a-zA-Z0-9\-\_]*' /proc/cmdline | cut -d'=' -f2)"
