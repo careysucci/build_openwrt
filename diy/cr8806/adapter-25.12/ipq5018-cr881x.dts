@@ -357,21 +357,21 @@
 			function = "qspi_clk";
 			drive-strength = <8>;
 			bias-disable;
-		}
+		};
 
 		cs-pins {
 			pins = "gpio8";
 			function = "qspi_cs";
 			drive-strength = <8>;
 			bias-disable;
-		}
+		};
 
 		data-pins {
 			pins = "gpio4", "gpio5", "gpio6", "gpio7";
 			function = "qspi_data";
 			drive-strength = <8>;
 			bias-disable;
-		}
+		};
 	};
 
 	mdio1_pins: mdio1-state {
@@ -380,14 +380,14 @@
 			function = "mdc";
 			drive-strength = <8>;
 			bias-pull-up;
-		}
+		};
 
 		mdio-pins {
 			pins = "gpio37";
 			function = "mdio";
 			drive-strength = <8>;
 			bias-pull-up;
-		}
+		};
 	};
 
 	led_pins: led-state {
