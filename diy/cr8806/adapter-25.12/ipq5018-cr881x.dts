@@ -140,12 +140,14 @@
 		reg = <0>;
 
 		nand-ecc-engine = <&qpic_nand>;
-		/* Same 2K/64B NAND family as CR880X: strength=8 breaks NAND
-		 * I/O on qpic-snand, use 4 instead (verified on CR8806;
-		 * matches the ECC layout written by the stock U-boot
-		 * flasher - upstream iodata,wn-dax3000gr does the same). */
-		nand-ecc-strength = <4>;
-		nand-ecc-step-size = <512>;
+		/* NO nand-ecc-strength override here - unlike the CR8806! The
+		 * CR881x GigaDevice NAND requires 8-bit ECC (NAND_ECCREQ(8,512)
+		 * in the kernel chip table) and the stock Xiaomi flasher writes
+		 * an 8-bit ECC layout. Copying the CR8806 strength=4 made the
+		 * kernel decode every PEB with the wrong layout: ubi attach of
+		 * rootfs_1 failed with error -74 on all 240 PEBs while U-boot
+		 * read the very same image clean. Let the driver follow the
+		 * chip's own requirements - same as the field-verified zcop DTS. */
 		nand-bus-width = <8>;
 
 		partitions {

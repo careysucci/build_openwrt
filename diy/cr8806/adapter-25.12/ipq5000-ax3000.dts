@@ -121,9 +121,12 @@
 		reg = <0>;
 
 		nand-ecc-engine = <&qpic_nand>;
-		/* strength=8 breaks NAND I/O on qpic-snand, use 4 instead
-		 * (same as upstream iodata,wn-dax3000gr; matches the ECC layout
-		 * written by the stock U-boot flasher) */
+		/* 4-bit ECC because the CR8806 flash chain (hzyitc qcom-nandc
+		 * "strength 4" + stock U-boot) writes a 4-bit layout, and the
+		 * reader must match it - an 8-bit read of 4-bit data fails every
+		 * page with EBADMSG. NOTE: this is layout-matching, NOT a driver
+		 * limit; the CR881x GigaDevice NAND is flashed in an 8-bit layout
+		 * and must NOT copy these two properties (see ipq5018-cr881x.dts). */
 		nand-ecc-strength = <4>;
 		nand-ecc-step-size = <512>;
 		nand-bus-width = <8>;
