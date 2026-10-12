@@ -183,7 +183,9 @@ jobs:
           echo "status=success" >> $GITHUB_OUTPUT
           # Multi-device build: join all device names into ONE line
           # (plain `cat` would emit several lines and corrupt GITHUB_ENV).
-          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          # Note: anchored on TARGET_DEVICE_ (the multi-profile entries) so
+          # CONFIG_TARGET_PER_DEVICE_ROOTFS is not picked up as a "device".
+          grep '^CONFIG_TARGET_DEVICE_.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(paste -sd- DEVICE_NAME)" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 

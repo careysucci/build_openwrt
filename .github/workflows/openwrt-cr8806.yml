@@ -1,14 +1,22 @@
 #
 #
 # File: .github/workflows/openwrt-cr8806.yml
-# Description: Build official OpenWrt (openwrt-25.12) router firmware for Xiaomi CR8806 / Redmi AX3000
+# Description: Build official OpenWrt (openwrt-25.12) router firmware for Xiaomi
+#              CR8806 / Redmi AX3000 AND Xiaomi CR881x (CR8816/8818/8819) —
+#              one build, two device images.
 #
 # Target:  qualcommax/ipq50xx (Qualcomm IPQ5018, aarch64, kernel 6.12)
-# Source:  official openwrt/openwrt @ openwrt-25.12, with the CR880x
-#          device support injected by diy/cr8806/adapter-25.12 (DTS, base-files,
-#          ipq-wifi BDF entry, ath11k board_id patches — ported from the
-#          kmiit/Redmi_AX3000_immortalwrt adaptation, most of which is already
-#          upstream in 25.12: QCN6122, RSSI fix, MPD, ge_phy, caldata helpers).
+# Source:  official openwrt/openwrt @ openwrt-25.12, with device support
+#          injected by diy/cr8806/adapter-25.12:
+#          - redmi_ax3000 (CR880X, QCA8337 switch): DTS, base-files, ipq-wifi
+#            BDF entry, ath11k board_id patches — ported from the
+#            kmiit/Redmi_AX3000_immortalwrt adaptation, most of which is
+#            already upstream in 25.12: QCN6122, RSSI fix, MPD, ge_phy,
+#            caldata helpers).
+#          - xiaomi_cr881x (CR8816/8818/8819, Motorcomm YT9215 switch): DTS
+#            + static BDFs from hzyitc/openwrt-redmi-ax3000, mainline v8
+#            YT921x DSA driver backport + REVSGMII hack (kernel 0913-0915,
+#            field-verified via the zcop build).
 #          Full ath11k stack: 2.4G (IPQ5018) + 5G (QCN6122) both work.
 # Profile: standard router — DHCP/firewall/WAN stock (PPPoE-ready), no
 #          proxy/NAS apps; first boot brands the box and provisions
@@ -174,8 +182,12 @@ jobs:
           echo -e "$(nproc) thread compile"
           make -j$(nproc) || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
-          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          # Multi-device build: join all device names into ONE line
+          # (plain `cat` would emit several lines and corrupt GITHUB_ENV).
+          # Note: anchored on TARGET_DEVICE_ (the multi-profile entries) so
+          # CONFIG_TARGET_PER_DEVICE_ROOTFS is not picked up as a "device".
+          grep '^CONFIG_TARGET_DEVICE_.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(paste -sd- DEVICE_NAME)" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
       - name: SSH Failed Debug
@@ -220,12 +232,14 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           touch release.txt
-          echo "OpenWrt CR8806 AP (official openwrt-25.12) Build" >> release.txt
+          echo "OpenWrt CR8806/CR881x AP (official openwrt-25.12) Build" >> release.txt
           echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, kernel 6.12)" >> release.txt
-          echo "Mode: standard router — LAN pinned to 172.16.3.19/24 (management address) with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; WAN port conduit unified to eth1 (openwrt#24696 workaround); LuCI http://172.16.3.19 (root, no initial password)" >> release.txt
+          echo "Devices: redmi_ax3000 (CR880X — QCA8337) + xiaomi_cr881x (CR8816/8818/8819 — YT9215)" >> release.txt
+          echo "Mode: standard router — LAN pinned to 172.16.3.19/24 (management address) with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; CR880X WAN port conduit unified to eth1 (openwrt#24696 workaround); LuCI http://172.16.3.19 (root, no initial password)" >> release.txt
           echo "WiFi: 2.4G+5G SSID 'WyHouse' (key wyhouse8888), 802.11r/k/v roaming enabled" >> release.txt
           echo "Perf: irqbalance + packet steering + GRO — gigabit line rate (all ports are 1GbE)" >> release.txt
           echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP | *-squashfs-sysupgrade.bin via LuCI" >> release.txt
+          echo "CR8816 note: flash the *xiaomi_cr881x* image (the redmi_ax3000 image boots on a CR881x but no ethernet port comes up — different switch chip)" >> release.txt
           echo "Date: $(date)" >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
