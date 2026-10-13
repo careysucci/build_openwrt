@@ -141,7 +141,10 @@ patch_file(
     [
         (
             '"ath11k/IPQ5018/hw1.0/cal-ahb-c000000.wifi.bin")\n\tcase "$board" in\n',
-            "\tredmi,ax3000|\n"
+            # NOTE: multi-board case patterns need "|\\" line continuations —
+            # a bare "|<newline>" is a BusyBox ash syntax error (verified on
+            # CR8816: uci-defaults aborts with 'unexpected word (expecting ")")').
+            "\tredmi,ax3000|\\\n"
             "\t\txiaomi,cr881x)\n"
             '\t\tcaldata_extract "0:art" 0x1000 0x20000\n'
             "\t\t;;\n",
@@ -149,7 +152,7 @@ patch_file(
         ),
         (
             '"ath11k/QCN6122/hw1.0/cal-ahb-b00a040.wifi.bin")\n\tcase "$board" in\n',
-            "\tredmi,ax3000|\n"
+            "\tredmi,ax3000|\\\n"
             "\t\txiaomi,cr881x)\n"
             '\t\tcaldata_extract "0:art" 0x26800 0x20000\n'
             "\t\t;;\n",
@@ -164,7 +167,7 @@ patch_file(
     "mi_dualboot_do_upgrade",
     [(
         'platform_do_upgrade() {\n\tcase "$(board_name)" in\n',
-        "\tredmi,ax3000|\n"
+        "\tredmi,ax3000|\\\n"
         "\t\txiaomi,cr881x)\n"
         '\t\tmi_dualboot_do_upgrade "$1"\n'
         "\t\t;;\n",
@@ -178,7 +181,7 @@ patch_file(
     "redmi,ax3000",
     [(
         'case "$board" in\n',
-        "redmi,ax3000|\n"
+        "redmi,ax3000|\\\n"
         "\txiaomi,cr881x)\n"
         '\tubootenv_add_mtd "0:appsblenv" "0x0" "0x10000" "0x20000"\n'
         "\t;;\n",
