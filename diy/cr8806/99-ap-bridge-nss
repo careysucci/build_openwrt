@@ -64,7 +64,9 @@
 #      topology on this qca8k board; Wi-Fi offload on by default).
 #      99-nss-topology also unifies the WAN conduit onto eth1 — the
 #      openwrt#24696 workaround the 25.12 line does in 99-ap-bridge
-#   4. Enables dual-band WiFi, same SSID on both bands:
+#   4. Enables dual-band WiFi, same SSID on both bands — ONLY on a
+#      factory-fresh wireless config; a guard mirrors the LAN one, so a
+#      settings-kept sysupgrade never overwrites an admin-configured WLAN:
 #      - 2.4G: HE40, channel 1   (40 MHz doubles the 2x2 HE PHY rate vs
 #        HE20; ch1 measured quietest: noise floor -95 dBm vs -94 on ch6 /
 #        -90 on ch11 — fall back to HE20 only if the secondary 20 MHz
@@ -156,6 +158,20 @@ while [ "$(count_radios)" -lt 2 ] && [ "$n" -lt 60 ]; do
 done
 
 if [ "$(count_radios)" -ge 1 ]; then
+    # Factory-fresh guard (mirrors the LAN guard in section 1):
+    # uci-defaults also re-run after a settings-kept sysupgrade, and this
+    # section would otherwise OVERWRITE an admin-configured WLAN (an AP
+    # running SSID "wy_house" with SAE would be flipped to WyHouse/psk2
+    # and drop every client). Stock `wifi config` generates wifi-iface
+    # sections WITHOUT an ssid, so any non-empty ssid means the radios
+    # were configured by hand — keep them untouched.
+    wif_ssid="$(uci -q get "wireless.@wifi-iface[0].ssid")"
+    if [ -n "$wif_ssid" ]; then
+        echo "[99-ap-bridge-nss] wifi already provisioned (ssid='$wif_ssid') — keeping it (settings-kept upgrade)"
+        echo "[99-ap-bridge-nss] done. LuCI: http://172.16.3.19 (root, no password)"
+        exit 0
+    fi
+
     # Radio-level settings, keyed by band (robust to radio naming)
     r=0
     while uci -q get "wireless.@wifi-device[$r]" >/dev/null 2>&1; do
