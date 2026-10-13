@@ -110,8 +110,12 @@ echo "[99-ap-bridge-nss] provisioning router-mode branding + WiFi..."
 # box's management IP (an AP at 172.16.0.226 was flipped back to .19 —
 # the admin found the box at the wrong address and went spelunking in
 # LuCI). Guard: only pin when lan still holds the factory default
-# (192.168.1.1) or has no address at all.
+# (192.168.1.1) or has no address at all. NOTE: 25.12 config_generate
+# writes the factory default in CIDR form ("192.168.1.1/24") — strip
+# the /suffix before comparing, or the guard never matches and the pin
+# is silently skipped (measured on CR8816 first boot 2026-10-13).
 lan_cur_ip="$(uci -q get network.lan.ipaddr)"
+lan_cur_ip="${lan_cur_ip%%/*}"
 if [ -z "$lan_cur_ip" ] || [ "$lan_cur_ip" = "192.168.1.1" ]; then
     uci set network.lan.proto='static'
     uci set network.lan.ipaddr='172.16.3.19'

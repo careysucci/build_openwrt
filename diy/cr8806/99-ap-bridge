@@ -6,8 +6,8 @@
 #
 # [Filename kept for continuity] This script NO LONGER configures
 # bridged-AP mode: the image boots as a STANDARD ROUTER — LAN pinned to
-# the per-board management address (CR880X: 172.16.3.19, CR881x:
-# 172.16.0.248), DHCP
+# 172.16.3.19/24 on BOTH boards (CR880X and CR881x alike, per the
+# 2026-10-13 management-address decision), DHCP
 # server, firewall and routed WAN (DHCP client or PPPoE, both work out
 # of the box). It only brands the box and provisions the WiFi below.
 # Converting to a bridged AP is a manual on-device step (recipe in this
@@ -35,8 +35,7 @@
 # timeout it exits 1 so it is retried on the next boot.
 #
 # What it does (everything else stays STOCK router defaults):
-#   1. LAN pinned to the per-board management address (CR880X:
-#      172.16.3.19, CR881x: 172.16.0.248) —
+#   1. LAN pinned to 172.16.3.19/24 on BOTH boards (CR880X and CR881x) —
 #      ONLY on a factory-fresh config; a settings-kept sysupgrade of an
 #      already-deployed box (e.g. one converted to a bridged AP with its
 #      own management IP) keeps its address untouched
@@ -75,16 +74,14 @@
 
 echo "[99-ap-bridge] provisioning router-mode branding + WiFi..."
 
-# Board dispatch: the CR881x (YT9215 switch sibling) gets its own
-# management address; the CR880X-only WAN conduit workaround below
-# keys off the same variable.
+# Board dispatch: only used by the CR880X-only WAN conduit workaround
+# below. Both boards share the same management address 172.16.3.19/24.
 board="$(cat /tmp/sysinfo/board_name 2>/dev/null)"
 lan_ip='172.16.3.19'
-[ "$board" = "xiaomi,cr881x" ] && lan_ip='172.16.0.248'
 
 # ---- 1. Network: fixed management IP + packet steering ---------------
-# LAN is pinned to the board's management address (CR880X 172.16.3.19,
-# CR881x 172.16.0.248). config_generate wrote stock 192.168.1.1/24 during preinit;
+# LAN is pinned to 172.16.3.19/24 on both boards. config_generate wrote
+# stock 192.168.1.1/24 during preinit;
 # this overrides it from uci_apply_defaults (START=10), which runs BEFORE
 # netifd (START=20) first starts — so the box comes up reachable at .19
 # on first boot, no window where it answers at 192.168.1.1. DHCP server,
@@ -102,11 +99,15 @@ lan_ip='172.16.3.19'
 # box's management IP (an AP at 172.16.0.226 was flipped back to .19 —
 # the admin found the box at the wrong address and went spelunking in
 # LuCI). Guard: only pin when lan still holds the factory default
-# (192.168.1.1) or has no address at all.
+# (192.168.1.1) or has no address at all. NOTE: 25.12 config_generate
+# writes the factory default in CIDR form ("192.168.1.1/24") — strip
+# the /suffix before comparing, or the guard never matches and the pin
+# is silently skipped (measured on CR8816 first boot 2026-10-13).
 # Packet steering: spread RX softirq load across both A53 cores, so a
 # single core cannot bottleneck WiFi<->wired forwarding at line rate.
 # (netifd >= 22.03 honors network.globals.packet_steering → RPS on all ifaces)
 lan_cur_ip="$(uci -q get network.lan.ipaddr)"
+lan_cur_ip="${lan_cur_ip%%/*}"
 if [ -z "$lan_cur_ip" ] || [ "$lan_cur_ip" = "192.168.1.1" ]; then
     uci set network.lan.proto='static'
     uci set network.lan.ipaddr="$lan_ip"
