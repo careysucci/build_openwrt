@@ -50,17 +50,22 @@
 #   5. Enables dual-band WiFi, same SSID on both bands — ONLY on a
 #      factory-fresh wireless config; a guard mirrors the LAN one, so a
 #      settings-kept sysupgrade never overwrites an admin-configured WLAN:
-#      - 2.4G: HE40, channel 1   (40 MHz doubles the 2x2 HE PHY rate vs
-#        HE20; ch1 measured quietest: noise floor -95 dBm vs -94 on ch6 /
-#        -90 on ch11 — fall back to HE20 only if the secondary 20 MHz
-#        turns out busy)
-#      - 5G:   HE80, channel 149 (non-DFS, up instantly, 30 dBm class;
-#        on-device scan: only one -86 dBm neighbor near ch161, while
-#        the 36-48 segment already carries 3 APs. HE80 is the max for
-#        iPhone-12-class clients. QCN6122 does negotiate HE160 too —
-#        measured on-device at 1297/1153 Mbps PHY, iperf3 465/355 Mbps
-#        through the 5G link — but 149-161 offers only 80 MHz
-#        contiguous; HE160 would force DFS channels with CAC/radar risk)
+#      - PER-BOARD channel plan: the two deployed APs (CR880X + CR881x)
+#        broadcast the same SSIDs and must never share a channel
+#        (measured 2026-10-15: both on ch1+ch149 at -44..-74 dBm mutual
+#        visibility, co-channel CSMA deferral halves airtime)
+#      - 2.4G: HE40, ch1 (CR880X: quietest on-site, noise floor -95 dBm)
+#        / ch11 (CR881x: strongest neighbour -51 dBm vs -46 on ch6).
+#        40 MHz doubles the 2x2 HE PHY rate vs HE20; hostapd falls back
+#        to HE20 when the secondary 20 MHz is busy (both ch1 and ch11
+#        measured landing at 20 MHz on-site)
+#      - 5G:   HE80, ch149 (CR880X: non-DFS, up instantly, 30 dBm class,
+#        near-empty segment) / ch36 (CR881x: UNII-1, universally
+#        client-supported, strongest neighbour -77 dBm on-site). HE80 is
+#        the max for iPhone-12-class clients. QCN6122 does negotiate
+#        HE160 too — measured on-device at 1297/1153 Mbps PHY, iperf3
+#        465/355 Mbps through the 5G link — but HE160 would force DFS
+#        channels with CAC/radar risk
 #      - country US: ath11k firmware is self-managed US on this board;
 #        the BDF caps real output at 23 dBm (2.4G) / 27 dBm (5G) anyway,
 #        while CN regdb would only lower the ceilings (measured)
@@ -70,8 +75,9 @@
 # Multi-AP roaming (valid once the boxes are converted to bridge mode):
 # flashing every box (CR880X and CR881x alike) with this same firmware gives them identical
 # SSID/password/mobility-domain — clients roam seamlessly over the
-# Ethernet backhaul. For wireless mesh instead, add an 802.11s interface
-# in LuCI (wpad-openssl already supports SAE mesh).
+# Ethernet backhaul, each box on its own channels (per-board plan above)
+# so the APs never fight for the same airtime. For wireless mesh instead,
+# add an 802.11s interface in LuCI (wpad-openssl already supports SAE mesh).
 # =============================================================
 
 echo "[99-ap-bridge] provisioning router-mode branding + WiFi..."
@@ -181,6 +187,20 @@ if [ "$(count_radios)" -ge 1 ]; then
         exit 0
     fi
 
+    # Per-board channel plan: the two deployed APs broadcast the same
+    # SSIDs and must never share a channel — measured 2026-10-15 with
+    # both boxes on ch1+ch149 at -44..-74 dBm mutual visibility:
+    # co-channel CSMA deferral halves airtime on both. CR880X keeps the
+    # measured-quietest ch1/ch149; CR881x takes ch11/ch36 (strongest
+    # neighbours -51 dBm on ch11 vs -46 on ch6; -77 dBm in 36-48).
+    if [ "$board" = "xiaomi,cr881x" ]; then
+        ch_2g=11
+        ch_5g=36
+    else
+        ch_2g=1
+        ch_5g=149
+    fi
+
     # Radio-level settings, keyed by band (robust to radio naming)
     r=0
     while uci -q get "wireless.@wifi-device[$r]" >/dev/null 2>&1; do
@@ -191,18 +211,18 @@ if [ "$(count_radios)" -ge 1 ]; then
         uci set "wireless.@wifi-device[$r].country=US"
         case "$band" in
             2g)
-                # ch1: quietest on-site (noise floor -95 dBm). HE40: full
-                # speed for 2.4G (2x2 HE40 ≈ 287 Mbps PHY vs 143 at HE20).
-                uci set "wireless.@wifi-device[$r].channel=1"
+                # HE40: full speed for 2.4G (2x2 HE40 ≈ 287 Mbps PHY vs
+                # 143 at HE20); hostapd falls back to HE20 when the
+                # secondary 20 MHz turns out busy (both ch1 and ch11
+                # measured landing at 20 MHz on-site).
+                uci set "wireless.@wifi-device[$r].channel=$ch_2g"
                 uci set "wireless.@wifi-device[$r].htmode=HE40"
                 ;;
             5g)
-                # ch149 + HE80: non-DFS, near-empty segment on-site.
-                # HE80 is the max for iPhone-12-class clients; QCN6122
+                # HE80: the max for iPhone-12-class clients; QCN6122
                 # does support HE160 (measured: 1297/1153 Mbps PHY) but
-                # 149-161 has only 80 MHz contiguous and HE160 would
-                # force DFS channels with CAC/radar risk.
-                uci set "wireless.@wifi-device[$r].channel=149"
+                # HE160 would force DFS channels with CAC/radar risk.
+                uci set "wireless.@wifi-device[$r].channel=$ch_5g"
                 uci set "wireless.@wifi-device[$r].htmode=HE80"
                 ;;
         esac
@@ -228,7 +248,7 @@ if [ "$(count_radios)" -ge 1 ]; then
         i=$((i + 1))
     done
     uci commit wireless
-    echo "[99-ap-bridge] WiFi up: 2.4G(HE40/ch1) + 5G(HE80/ch149), SSID=WyHouse, 802.11r/k/v on"
+    echo "[99-ap-bridge] WiFi up: 2.4G(HE40/ch$ch_2g) + 5G(HE80/ch$ch_5g), SSID=WyHouse, 802.11r/k/v on"
 else
     echo "[99-ap-bridge] WARNING: no wifi-device in /etc/config/wireless after 60s"
     echo "[99-ap-bridge] WiFi NOT provisioned — exiting 1 to retry on next boot"
