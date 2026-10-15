@@ -147,7 +147,7 @@ Clash DNS → 匹配 nameserver-policy "geosite:cn" → 用 172.16.3.7
 ### 代理节点域名解析
 
 ```
-Clash 需连接代理节点 server.holytechx.com
+Clash 需连接代理节点 server.example-proxy.com
     ↓
 proxy-server-nameserver → 172.16.3.7 (内网直达，不经 tproxy)
     ↓ .7 查上游 223.5.5.5 → 返回代理IP
@@ -713,13 +713,66 @@ sed -i 's|url: "http://127.0.0.1:11111/subscription"|url: "YOUR_SUB_URL"|' \
 #### 4.5 运行中强制刷新订阅
 
 ```bash
+# API secret 非固定：以 UCI 的 dashboard_password 为准（磁盘 YAML 里的 secret 可能已过期）
 curl -X PUT "http://127.0.0.1:9090/providers/proxies/cc-auto" \
-  -H "Authorization: Bearer oc_6Qf9v2LmP8xT4rN1kY7sDz3aH5uWc"
+  -H "Authorization: Bearer $(uci get openclash.config.dashboard_password)"
+```
+
+验证 provider 更新状态（updatedAt 为最近时间即成功）：
+
+```bash
+curl "http://127.0.0.1:9090/providers/proxies" \
+  -H "Authorization: Bearer $(uci get openclash.config.dashboard_password)" \
+  | grep -o 'cc-auto.\{0,80\}'
 ```
 
 ---
 
-### 问题五：LEDE 打包 ext4 out of space
+### 问题七：订阅拉取 EOF / 无法获取节点（机场迁移订阅域名）
+
+**症状：** OpenClash 无法更新订阅节点；`/tmp/openclash.log` 反复刷：
+
+```
+[Provider] cc-auto pull error: Get "https://旧订阅地址": EOF
+```
+
+**根因：** 机场迁移了订阅服务器域名，旧地址返回 `301 Moved Permanently`。
+mihomo 的 provider 拉取不跟随跳转，读到 301 即失败报 EOF。
+（实测案例：2026-10-15 某机场订阅域名整体迁移，
+旧地址 301 后 provider 连续两天拉取失败，缓存节点过期后国外全线 timeout。）
+
+**诊断：**
+
+```bash
+curl -sIL '旧订阅URL'     # 看 Location: 指向的新地址（301 + Location 头）
+curl -sL -o /tmp/sub.yaml '旧订阅URL' && grep -c '^  - ' /tmp/sub.yaml   # 跟随跳转验证可得节点
+```
+
+**修复：**
+
+```bash
+# 1. 用 Location 指向的最终地址替换 YAML 中的 url（只换域名/路径，保留 sid/token 查询串）
+sed -i 's|旧域名/旧路径|新域名/新路径|' /etc/openclash/config/clash-all-noicon-clash.yaml
+
+# 2. 若新域名与旧域名不同，同步 nameserver-policy 与 fake-ip-filter 条目
+sed -i 's|旧订阅域名|新订阅域名|g' /etc/openclash/config/clash-all-noicon-clash.yaml
+
+# 3. 重启并验证
+/etc/init.d/openclash restart
+curl -X PUT "http://127.0.0.1:9090/providers/proxies/cc-auto" \
+  -H "Authorization: Bearer $(uci get openclash.config.dashboard_password)"
+```
+
+**预防（已固化进 setup-openclash.sh / 模板 YAML）：**
+- 脚本下载用 `curl -L` 并记录 `%{url_effective}`，把**最终生效地址**写入 YAML，
+  后续 mihomo 拉取不会撞上 301；
+- 订阅通道固化 `proxy: DIRECT` + 订阅域名 DNS → .7（内网直达），
+  即使机场节点全部失效，订阅也能自动拉取最新节点自愈；
+  前提是机场订阅端点国内可直达，若必须经代理则删掉 YAML 里的 `proxy: DIRECT` 行。
+
+---
+
+### 问题八：LEDE 打包 ext4 out of space
 
 **症状：** `ext4_allocate_best_fit_partial: failed to allocate 2671 blocks`
 
@@ -730,13 +783,109 @@ CONFIG_TARGET_ROOTFS_PARTSIZE=1024
 
 ---
 
-### 问题六：netopt.sh 从未执行
+### 问题九：netopt.sh 从未执行
 
 **症状：** CPU 始终降频，IRQ 全堆 CPU0
 
 **原因：** shebang 错误 `#!/bin/sh /bin/sh` → 应为 `#!/bin/sh /etc/rc.common`
 
 **修复：** 重写 netopt.sh，使用正确的 OpenWrt init 格式。
+
+---
+
+### 问题十：晚高峰节点大面积超时 / 网速不稳定（机场中转线路被干扰）
+
+**症状：** 晚间大量节点延迟测试 5000ms 超时；`/tmp/openclash.log` 刷
+`xxx:443 connect error: context deadline exceeded` 和成片的
+`dial tcp <Cloudflare IP>:443: i/o timeout`；走代理的服务同时断流/变慢，
+但在数百秒后部分恢复，反复抖动。
+
+**定位思路（三步分层，区分机场侧 vs 本地侧）：**
+
+1. **本地基线**：直连国内 204/baidu 应 <0.5s；DNS 分流正常；CPU/内存/conntrack 健康；
+   PPPoE 未重拨（`ubus call network.interface.wan status` 看 uptime）。全绿 → 排除本地。
+2. **SNI 对照测试（决定性一步）**：从路由器直连同一 CDN 的两个域名对比：
+   ```bash
+   curl -sk -o /dev/null -w "cloudflare.com tcp=%{time_connect}s tls=%{time_appconnect}s code=%{http_code}\n" -m 8 https://www.cloudflare.com/
+   curl -sk -o /dev/null -w "机场节点域名 tcp=%{time_connect}s tls=%{time_appconnect}s code=%{http_code}\n" -m 8 https://机场节点域名/
+   ```
+   cloudflare.com TLS 正常（code=200）而机场中转域名 tls=0.000/code=000 →
+   **SNI 级针对性干扰**（机场中转域名被针对，与本地线路无关）。
+   注：tcp 时间远小于真实 RTT（如 <5ms，到 CF 边缘不可能）= 中间设备劫持应答，
+   同样是干扰证据。
+3. **错误时段分布**：
+   ```bash
+   grep error /tmp/openclash.log | grep -oE "T[0-9][0-9]" | sort | uniq -c
+   ```
+   错误集中在晚高峰时段（其他时段几乎为零）→ 干扰具有时段性，通常午夜后自动缓解。
+
+**放大机制：** 多个 select 组指向同一 url-test 组；url-test 选中的节点挂掉时，
+所有服务同时断流；且 url-test 有 300s 测试周期，切换存在 0-5 分钟延迟。
+节点在"可用↔超时"间抖动时，体验就是断断续续。
+
+**处置：**
+
+```bash
+# 1. 查看各组当前选中节点（确认是否选中了挂掉节点）
+curl -s http://127.0.0.1:9090/proxies -H "Authorization: Bearer $(uci get openclash.config.dashboard_password)" \
+  | tr '{' '\n' | grep '"now"' | sed 's/.*"name":"\([^"]*\)".*"now":"\([^"]*\)".*/\1 -> \2/'
+
+# 2. 触发目标组重新测速，加速 url-test 切换（组名需 URL 编码）
+curl -s "http://127.0.0.1:9090/group/%E6%97%A5%E6%9C%AC-%E8%87%AA%E5%8A%A8/delay?url=https%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=5000" \
+  -H "Authorization: Bearer $(uci get openclash.config.dashboard_password)"
+
+# 3. 验证恢复（经认证代理口测 204，凭据在 uci openclash.@authentication）
+curl -s -o /dev/null -w "code=%{http_code} t=%{time_total}s\n" \
+  -x http://user:pass@127.0.0.1:7893 http://www.gstatic.com/generate_204
+```
+
+- 等待/触发 url-test 自动切换后通常即恢复，无需重启 OpenClash；
+- 晚高峰可把主力组手动切到**直连线路组**（如 香港-自动/美国-自动，避开 CF 中转）；
+- 若持续多日恶化，向机场反馈中转线路被干扰，请求修复/更换中转。
+
+---
+
+### 问题十一：配置是否泄露/暴露特征导致被针对（审计清单）
+
+**背景：** 节点被 SNI 针对后自然要问：是不是我的配置暴露了什么？
+先看证据定性：同一宽带线路上 cloudflare.com TLS 正常而机场中转域名被掐
+→ 干扰基于**域名黑名单字符串**（机场域名被全网拉黑，所有用户同等受害），
+不是基于用户 IP/身份的定点针对。配置审计的目标是消除叠加特征、缩小暴露面。
+
+**已发现并修复的真实缺陷：**
+
+1. **TLS 指纹根键写错（静默失效）**：YAML 根级别的 `client-fingerprint` 不是
+   mihomo 合法键，会被**静默忽略**；正确键名为 `global-client-fingerprint`。
+   后果：订阅节点未自带 `client-fingerprint` 时（实测：机场 24 个 CF 中转 ws 节点全都没有），
+   TLS ClientHello 回退 **Go 语言默认指纹**——众所周知的标准代理工具特征。
+   被 SNI 针对的节点同时暴露 Go ClientHello，双特征叠加。
+   修复：`global-client-fingerprint: chrome`（已固化进模板 YAML 与设备运行时）。
+
+2. **NTP 默认国外源**：`openwrt.pool.ntp.org` 是路由器自身唯一的常规直连国外 UDP 流量。
+   修复：换 `ntp.aliyun.com` 等（已固化进 10-system.sh；uci 给 list 赋值必须
+   `delete` + `add_list`，`uci set` 会报 Usage 错误）。
+
+**审计过且干净的项（自检命令）：**
+
+| 检查面 | 命令 | 判据 |
+|--------|------|------|
+| DNS 链路封闭 | `cat /etc/resolv.conf` | 仅 127.0.0.1/::1 |
+| | `uci get dhcp.@dnsmasq[0].noresolv; uci get dhcp.@dnsmasq[0].server` | `1` + `127.0.0.1#7874` |
+| | `nft list ruleset \| grep "dport 53"` | DNS Hijack 规则存在（v4/v6，含本机 skgid!=65534） |
+| 路由器自身外联 | `netstat -tnp \| grep ESTAB \| grep -v clash \| grep -vE "172\\.16\\.|10\\."` | 空（无 mihomo 之外的国外连接） |
+| QUIC 拒绝行为 | `nft list ruleset \| grep "udp dport 443"` | `reject with icmp port-unreachable`（正常网络行为，无特征） |
+| IPv6 泄露 | `uci get openclash.config.china_ip6_route` | `1`（CN v6 内核直转，国外 v6 走代理） |
+| 节点协议盘点 | 看 provider 缓存：`reality-opts`/`flow: xtls-rprx-vision`/`network: ws` | reality 节点抗 SNI 检测；ws+tls 节点靠指纹伪装 |
+| API 监听 | 运行时 YAML `external-controller` | OpenClash 会改写为 0.0.0.0 供面板访问；WAN 入站 REJECT 兜底，属可控 LAN 面 |
+
+**关于 BBR 的取舍：** 路由器开 BBR 后，mihomo→节点连接使用 BBR 拥塞控制
+（浏览器用 cubic）。BBR 行为指纹在学术上可被行为分析识别，但需要长时间统计，
+现实针对性检测主要靠 SNI/ClientHello；BBR 对代理链路吞吐收益明显，建议保留。
+
+**结论：** 能被看到的本质特征 = 节点域名 SNI（vless+tls 类协议固有，配置无法隐藏，
+只有 reality/ech 协议级方案能解决）+ 已修复的 Go ClientHello。DNS/自身外联/IP 泄露面
+均为干净。若机场长期被 SNI 针对且无 reality 节点可选，考虑换机场或要求其提供
+reality/vless-anytls 类抗封锁节点。
 
 ---
 

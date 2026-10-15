@@ -14,6 +14,16 @@ uci set system.@system[0].timezone=CST-8
 uci set system.@system[0].zonename=Asia/Hong_Kong
 uci commit system
 
+# NTP: use domestic servers only — default openwrt.pool.ntp.org resolves to
+# foreign IPs and is the router's only routine direct-to-foreign UDP flow.
+# (uci set cannot assign a list; must delete + add_list)
+uci delete system.ntp.server 2>/dev/null || true
+uci add_list system.ntp.server='ntp.aliyun.com'
+uci add_list system.ntp.server='ntp1.aliyun.com'
+uci add_list system.ntp.server='ntp2.aliyun.com'
+uci commit system
+/etc/init.d/sysntpd restart 2>/dev/null || true
+
 # Auto-mount
 uci set fstab.@global[0].anon_mount=1
 uci commit fstab

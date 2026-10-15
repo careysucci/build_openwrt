@@ -13,15 +13,18 @@ proxy-providers:
     # 首次配置（SSH 到路由器运行）：
     #   /root/setup-nikki.sh 'https://你的订阅链接'
     #   脚本会：① 停止 OpenClash ② 下载节点写入缓存
-    #           ③ 把真实 URL 写入本字段 ④ 启动 Nikki
+    #           ③ 把真实 URL（最终生效地址）写入本字段 ④ 启动 Nikki
     #
     # URL 写入后，mihomo 每 interval 秒自动拉取最新节点（无需 Nikki UI 订阅管理）。
+    #
+    # 排障：机场迁移订阅域名时旧地址会 301，mihomo 不跟随跳转 → provider 拉取报 EOF。
+    #   诊断：curl -sIL '旧URL' 看 Location；修复：把 url 换成 Location 指向的最终地址。
     type: http
     url: "http://127.0.0.1:11111/subscription"
     # SUB-PROXY-FIRSTBOOT-BEGIN
-    # 首次启动窗口期：订阅下载强制直连（DIRECT），绕过规则引擎。
-    # 此时没有任何节点，若经规则引擎必然命中 国外 空组 → 死锁。
-    # setup-nikki.sh 会在节点加载完成后删除本块 → 往后订阅更新恢复走代理组。
+    # 订阅下载强制直连（DIRECT），绕过规则引擎（固化，不再删除）。
+    # 机场订阅端点国内可直达（curl 直连 200），直连拉取永不依赖节点存活；
+    # 若某机场端点必须经代理才能访问，手动删除下一行恢复走规则引擎。
     proxy: DIRECT
     # SUB-PROXY-FIRSTBOOT-END
     path: "/etc/nikki/run/providers/cc-auto.yaml"
@@ -97,9 +100,11 @@ dns:
     "+.gh-proxy.org":
       - 172.16.3.7
     # SUB-DNS-FIRSTBOOT-BEGIN
-    # 订阅域名首次启动窗口期走 .7 解析（此时无节点，.6 上游经代理不可用 → 解析死锁）。
-    # setup-nikki.sh 会把占位域名替换为真实订阅域名；
-    # 节点加载完成后删除本块 → 往后订阅域名与其他国外域名一样走 .6 解析。
+    # 订阅域名走 .7 解析（固化，不再删除）：
+    #   · .6 上游 DoH 经代理 → 节点全灭时订阅域名解析死锁，订阅无法自愈；
+    #   · .7 内网直达不依赖代理 → 订阅永远可解析可下载（配合上方 proxy: DIRECT）。
+    # setup-nikki.sh 会把占位域名替换为真实订阅域名（nameserver-policy 与
+    # fake-ip-filter 两处同占位符，一次 sed 全局替换）。
     "+.sub-placeholder-7f3a9c.invalid":
       - 172.16.3.7
     # SUB-DNS-FIRSTBOOT-END
@@ -108,8 +113,9 @@ dns:
     - "+.lan"
     - "+.local"
     - "geosite:cn"
-    - "+.holytech.bid"
-    - "+.holytechx.com"
+    # 订阅域名占位（setup-nikki.sh 替换为真实域名）：
+    # redir-host 模式下本列表不生效；fake-ip 模式下确保订阅域名解析真实 IP。
+    - "+.sub-placeholder-7f3a9c.invalid"
 
 ipv6: true
 

@@ -10,7 +10,7 @@
 # 完成的工作：
 #   1. 停止 OpenClash（两者共享端口，不能同时运行）
 #   2. 下载订阅节点写入 proxy-provider 缓存（立即生效）
-#   3. 将真实订阅 URL 写入 YAML（mihomo 每 24h 自动更新）
+#   3. 将真实订阅 URL（最终生效地址）写入 YAML（mihomo 每 24h 自动更新）
 #   4. 禁用 OpenClash 开机自启，启用并启动 Nikki
 #
 # 说明：
@@ -23,7 +23,7 @@
 YAML_CFG="/etc/nikki/profiles/nikki-config.yaml"
 PROVIDER_PATH="/etc/nikki/run/providers/cc-auto.yaml"
 PLACEHOLDER_URL="http://127.0.0.1:11111/subscription"
-FIRST_RUN=0   # 首次配置标志：1=节点就绪后需执行"切回正常分流"步骤
+FIRST_RUN=0   # 首次配置标志：1=执行热重载使订阅自愈配置生效（步骤 5）
 API_SECRET="nk_7Xm2pQ9wR4tK8vL1nJ6cF3bA5yD0e"   # 与 yaml 中 secret 一致
 
 # ─── 输出辅助（busybox ash 兼容）────────────────────────────
@@ -77,15 +77,23 @@ _step "2: 下载订阅节点"
 mkdir -p "$(dirname "$PROVIDER_PATH")"
 TMP_FILE="/tmp/nk_setup_$$.yaml"
 
-_info "正在下载..."
-if ! curl -fsSL --connect-timeout 30 --max-time 120 "$SUB_URL" -o "$TMP_FILE" 2>&1; then
-    rm -f "$TMP_FILE"
+_info "正在下载（-L 跟随跳转，机场迁移也能拿到最终地址）..."
+CURL_ERR="/tmp/nk_setup_err.$$"
+EFFECTIVE_URL=""
+if ! EFFECTIVE_URL=$(curl -fsSL --connect-timeout 30 --max-time 120 \
+        -w '%{url_effective}' -o "$TMP_FILE" "$SUB_URL" 2>"$CURL_ERR"); then
+    rm -f "$TMP_FILE" "$CURL_ERR"
     _err "下载失败，请检查："
     echo "        1. 路由器当前能否上网（Nikki/OpenClash 均未启动时应可直接上网）"
     echo "        2. 订阅 URL 是否正确"
     echo "        3. 手动测试：curl -v '$SUB_URL'"
     exit 1
 fi
+rm -f "$CURL_ERR"
+# 以最终生效 URL 为准：机场迁移时旧地址会 301 到新域名，
+# mihomo 的 provider 拉取不跟随跳转（报 EOF），必须写入最终地址。
+[ -n "$EFFECTIVE_URL" ] && SUB_URL="$EFFECTIVE_URL"
+_info "最终订阅地址: $SUB_URL"
 
 # 校验是否为 Clash YAML 格式
 if ! grep -q "^proxies:" "$TMP_FILE" 2>/dev/null; then
@@ -128,11 +136,12 @@ else
             _ok "YAML proxy-provider URL 已写入（首次配置）"
             _info "mihomo 将每 86400 秒（24h）自动拉取最新节点"
             FIRST_RUN=1
-            # 订阅域名写入 nameserver-policy 占位条目（首次窗口走 .7 解析，破无节点解析死锁）
+            # 订阅域名写入占位条目（nameserver-policy + fake-ip-filter 两处）：
+            # 首次窗口走 .7 解析，破无节点解析死锁；节点就绪后保持 .7（见步骤 5 自愈设计）。
             SUB_DOMAIN=$(printf '%s' "$SUB_URL" | sed -e 's|^[a-zA-Z][a-zA-Z0-9+.-]*://||' -e 's|/.*$||' -e 's|:.*$||')
             if [ -n "$SUB_DOMAIN" ]; then
-                sed -i "s|+\.sub-placeholder-7f3a9c\.invalid|+.${SUB_DOMAIN}|" "$YAML_CFG"
-                _ok "订阅域名 ${SUB_DOMAIN} 首次启动 DNS → .7（节点就绪后自动切回 .6）"
+                sed -i "s|sub-placeholder-7f3a9c\.invalid|${SUB_DOMAIN}|g" "$YAML_CFG"
+                _ok "订阅域名 ${SUB_DOMAIN} DNS → .7（nameserver-policy / fake-ip-filter）"
             fi
         else
             _err "YAML 写入失败，请手动编辑："
@@ -162,15 +171,16 @@ _info "启动 Nikki（mihomo 内核加载中，约需 5-15 秒）..."
 /etc/init.d/nikki start
 _ok "Nikki 启动命令已执行"
 
-# ─── 步骤 5（仅首次）：节点就绪后切回正常分流 ──────────────
+# ─── 步骤 5（仅首次）：让订阅自愈配置生效 ────────────────────
+# 设计（2026-10 实测修订）：firstboot 块不再删除——
+#   · cc-auto 保持 proxy: DIRECT：机场订阅端点国内可直达，直连拉取永不依赖节点存活；
+#   · 订阅域名保持 DNS → .7：无节点时也能解析（.6 上游经代理 → 节点全灭即解析死锁）。
+#   代价：若某机场订阅端点必须经代理才能访问，需手动删掉 proxy: DIRECT 行。
+# 此步仅热重载，让步骤 3 写入的 nameserver-policy / fake-ip-filter 生效。
 if [ "$FIRST_RUN" -eq 1 ]; then
-    _step "5: 切换订阅域名回正常分流（DNS → .6，下载 → 规则引擎）"
-    _info "等待 mihomo 内核加载节点缓存（约 15 秒）..."
-    sleep 15
-    # 删除首次窗口期临时配置：DNS 占位块 + provider 直连行
-    sed -i '/# SUB-DNS-FIRSTBOOT-BEGIN/,/# SUB-DNS-FIRSTBOOT-END/d' "$YAML_CFG"
-    sed -i '/# SUB-PROXY-FIRSTBOOT-BEGIN/,/# SUB-PROXY-FIRSTBOOT-END/d' "$YAML_CFG"
-    _ok "已切换：订阅域名 DNS → .6，订阅下载 → 规则引擎（国外组）"
+    _step "5: 热重载使订阅自愈配置生效（DIRECT 拉取 + .7 解析）"
+    _info "订阅通道已固化：DIRECT 下载 + .7 解析，节点全灭时也能自愈拉新节点"
+    sleep 3
     _RELOADED=0
     for _try in 1 2 3 4 5; do
         if curl -fsS -m 5 -X PUT \
@@ -184,11 +194,11 @@ if [ "$FIRST_RUN" -eq 1 ]; then
         sleep 10
     done
     if [ "$_RELOADED" -eq 1 ]; then
-        _ok "mihomo 已热重载，正常分流生效"
+        _ok "mihomo 已热重载，订阅自愈配置生效"
     else
         _info "热重载未响应，执行 Nikki restart 使配置生效..."
         /etc/init.d/nikki restart
-        _ok "Nikki 已重启，正常分流生效"
+        _ok "Nikki 已重启，订阅自愈配置生效"
     fi
 fi
 
