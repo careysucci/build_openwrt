@@ -12,6 +12,8 @@
 #                * 国内域名 → 172.16.3.7
 #                * 国外域名 → 172.16.3.6  (广告过滤 + 外国解析)
 #            - 默认路由 = 代理 → 无 IP 泄漏
+#            - UDP 走代理 + 境外 QUIC(UDP 80/443) 内核层 reject, 国内放行
+#              → 与 OpenClash disable_udp_quic='1' 同标准 (防 UDP QoS 限速)
 #
 # SAFETY: homeproxy is DISABLED by default (main_node='nil' + service
 #         disabled). Only ONE transparent proxy can own tproxy at a time;
@@ -86,7 +88,15 @@ esac
 # No node selected yet (subscription fetched on demand) and service disabled,
 # so homeproxy cannot grab tproxy or affect the running OpenClash setup.
 uci set homeproxy.config.main_node='nil'
-uci set homeproxy.config.main_udp_node='nil'
+# UDP follows the main node (same as clash: UDP 走代理). This also enables
+# homeproxy's built-in QUIC guard in firewall_post.ut:
+#   homeproxy_mangle_prerouting 链 (仅当 main_udp_node != nil 时生成):
+#     ip daddr @homeproxy_mainland_addr_v4/v6 counter return  ← 国内放行
+#     udp dport { 80, 443 } counter reject "Fuck you QUIC"     ← 境外拒绝
+# → 浏览器被迫回退 TCP+TLS 走代理, 规避运营商对 UDP 的 QoS 限速.
+# Safety: init.d start_service() 在 main_node='nil' 时直接 return (零
+# 防火墙/路由规则), 所以预设 'same' 在禁用态无任何副作用.
+uci set homeproxy.config.main_udp_node='same'
 
 uci commit homeproxy
 
@@ -96,4 +106,6 @@ uci commit homeproxy
 echo "[36-homeproxy] UCI pre-configured (bypass-CN + 内网分流DNS), DISABLED by default"
 echo "[36-homeproxy] To activate: disable OpenClash/Nikki first, update the"
 echo "[36-homeproxy] subscription, pick a node as main node, then enable homeproxy."
+echo "[36-homeproxy] UDP is preset to follow the main node → once activated, overseas"
+echo "[36-homeproxy] QUIC(UDP 80/443) is kernel-rejected (CN kept) like OpenClash."
 
