@@ -889,6 +889,120 @@ reality/vless-anytls 类抗封锁节点。
 
 ---
 
+### 问题十二：DNS 突然全量泄露 + 节点渐进失效（特定坏内核 + 版本误判）
+
+**症状（两个症状同源）：**
+1. dnsleaktest 之类测试从"干净"突变为"全量泄露"（显示 ISP 解析器）；
+2. 节点用着用着大面积失效、延迟飙升，`/tmp/openclash.log` 连片
+   `connect error: context deadline exceeded`。
+
+**根因链条（2026-10 实测案例，含归因修正）：**
+自动更新拉到某个**特定坏版本**内核（嫌疑版本 alpha-94b13ae；注意**不是所有
+alpha 都有问题**——alpha-gbc76c13 复测 7874 监听正常、无泄露）→ 问题内核运行时
+mihomo DNS 未正常监听 7874（静默、无报错）→ dnsmasq 上游
+`server=127.0.0.1#7874` 不可达 → 回退 `resolv.conf.auto` 里的 ISP DNS
+→ LAN 所有查询经 nft 劫持进 dnsmasq 后**明文 53 出 WAN 到 ISP** →
+"泄露很严重"。同时 mihomo 自身解析节点域名也走这条污染路径，与问题十的
+SNI 干扰叠加放大节点失效。
+
+> **归因修正（2026-10-17）**：最初怀疑"alpha 通道整体移除了 redir-host"，
+> 但同一文件（alpha-gbc76c13）复测完全正常——初次诊断误把 `-v` 读到的
+> **文件版本**当成**运行进程版本**（软链接脱节，见下），事故时进程内的
+> 真实版本未被捕获。教训：排查内核问题必须同时核对文件与进程（`ps` +
+> 启动时间），按"特定版本有 bug"而非"整个通道有 bug"定归因。
+
+**两个叠加的坑：**
+- `/etc/openclash/clash` 是指向 `core/clash_meta` 的软链接，内核文件被
+  更新后**运行中的进程仍是旧二进制**（Linux 进程替换语义），直到服务重启
+  才加载新内核——所以"换内核"与"发作"之间有数小时~数天延迟，时间线极易
+  误导排查方向；
+- `/configs` API **不回显 dns 字段**（v1.19.32 正式版同样如此），
+  不能用 `configs.dns == null` 判断 DNS 是否启用。
+
+**定位（四条命令定乾坤）：**
+
+```bash
+/etc/openclash/clash -v                                    # 文件版本；须结合 ps 启动时间判断进程是否已加载它
+ss -lnptu | grep 7874                                      # 空 = mihomo DNS 没起来（真断链）
+grep -hE '^(no-resolv|server)' /var/etc/dnsmasq.conf.cfg*  # 正常：no-resolv + server=127.0.0.1#7874
+cat /proc/net/nf_conntrack | grep 'dport=53 ' | grep -vE '127\.0\.0\.1|172\.16\.3\.'  # 有到 ISP DNS 的条目 = 正在泄露
+```
+
+**修复：**
+
+```bash
+# 1. 换回确认正常的内核（直连 GitHub 慢时用 gh-proxy.org 前缀镜像下载）
+gunzip -c mihomo-*.gz > /etc/openclash/core/clash_meta && chmod +x /etc/openclash/core/clash_meta
+
+# 2. dnsmasq fail-fast 加固：上游 7874 挂了宁可 SERVFAIL 也不回退 ISP
+#    （此项与内核版本无关，是防泄露的关键兜底，务必保持）
+uci set openclash.config.dnsmasq_noresolv='1'
+
+uci commit openclash && /etc/init.d/openclash restart   # 必须重启，热重载/不重启 = 白换
+```
+
+**防复发（已固化进项目）：**
+- `30-openclash.sh`：固化 `dnsmasq_noresolv='1'`（fail-fast，与内核版本无关，
+  是唯一真正的防泄露兜底）；`auto_update='1'` 保持自动更新（alpha 通道按实证
+  放行——问题出在特定坏版本，不在通道本身）；
+- `dnsmasq_noresolv` 在设备上曾漂移回 `'0'`（LuCI 保存/插件更新可覆盖），
+  重新刷机/大改后按上面四条定位命令复查一遍；
+- 若某次自动更新后再现"7874 不监听"，用上面命令确认后回滚内核文件并
+  restart 即可，无需改配置。
+
+---
+
+### 问题十三：browserleaks 显示“IP 泄露”——WebRTC host candidate 暴露全局 v6（代理无解）
+
+**症状**：修复 DNS 后复测 browserleaks.com/ip，WebRTC 栏出现真实运营商 IPv6
+（如 `2408:8256:...`），看起来像“代理全面失效”。
+
+**结论先行**：WebRTC 的 **host candidate 由浏览器直接从本机网卡枚举**（包含
+SLAAC 获得的全局 IPv6），该信息不经过任何网络流量，路由器代理/TProxy/nft
+**全部无法拦截**。这不是代理失效。
+
+**分层取证法（排除法逐项证伪，2026-10-16 实测命令）：**
+
+```bash
+# 1. 主请求是否走代理：经 mixed 端口测出口
+curl -x http://Clash:PASS@127.0.0.1:7893 https://api.ip.sb/ip   # 应返回节点 IP
+
+# 2. DNS 是否泄露：查 whoami，看 resolver 出口
+ curl -H "Authorization: Bearer $SEC" \
+   "http://127.0.0.1:9090/dns/query?name=whoami.ds.akahelp.net&type=TXT"
+#   正常：ns=Google/CF 等国外 resolver，ip/ecs=节点出口段；异常：ISP/国内 resolver
+
+# 3. 客户端流量是否被劫持进 mihomo（conntrack 反向项 src=路由器:7892）
+ cat /proc/net/nf_conntrack | grep <目标IP>
+
+# 4. UDP(STUN)是否被 tproxy + mihomo UDP 转发是否工作
+ nft list ruleset | grep -E 'tproxy'        # 应有 udp tproxy :7895 且计数在涨
+ curl -H "Authorization: Bearer $SEC" http://127.0.0.1:9090/connections | grep udp
+
+# 5. 测试机是否持有全局 v6（WebRTC host candidate 泄露源，实锤用）
+ ip neigh show | grep <测试机IP>             # 拿 MAC
+ ip -6 neigh show | grep <MAC>               # 有 2408:/2xxx: 全局地址 = 实锤
+```
+
+**修复（只能在浏览器侧）**：
+- Chrome/Edge：装 “WebRTC Leak Prevent” 类扩展，IP handling policy 设为
+  `disable non-proxied UDP`；
+- Firefox：`about:config` → `media.peerconnection.enabled=false`；
+- 路由器侧停发全局 v6 RA 可根治但代价是全家失去 IPv6 直连，一般不选。
+
+**“之前不泄露”的常见解释**：PPPoE 重拨更换 v6 前缀后客户端重新 SLAAC，
+测试机刚拿到全局 v6 的时间差导致对比错觉，与代理层改动无关。
+
+**泄露判定标准（避免误读测试结果）**：
+| 测试项 | 正常（未泄露） | 真泄露 |
+|--------|----------------|--------|
+| 主 IP | 节点 IP/节点国家 | 真实 v4（120.x 等） |
+| DNS resolver | Google/CF/节点地区 | 本省 ISP resolver |
+| WebRTC srflx | 节点 IP | 真实 v4/v6 |
+| WebRTC host | **全局 v6 会显示，属浏览器本地行为，非代理问题** | — |
+
+---
+
 ## IPv6 泄漏防护
 
 ### 方案：开启 IPv6 代理（推荐）
@@ -938,7 +1052,8 @@ OpenClash 启用 `ipv6_enable=1` 后自动创建 `openclash_mangle_v6` 链，无
 - https://ipleak.net
 - https://ipv6leak.com
 
-正常结果：**只显示代理节点 IP，无真实 IPv6 地址暴露**。
+正常结果：**主连接与 DNS 只显示代理节点 IP**。注意：WebRTC 栏若显示客户端
+本机的全局 IPv6（如 2408: 开头），属浏览器本地行为，代理无法拦截，详见问题十三。
 
 ---
 

@@ -121,6 +121,14 @@ uci set openclash.config.stack_type='system'
 uci set openclash.config.core_type='Meta'
 uci set openclash.config.core_version='linux-amd64-v1'
 
+# ── Core auto-update: ENABLED ────────────────────────────────
+# OpenClash checks for core updates daily (01:00). Alpha cores are accepted
+# on purpose: 2026-10 re-test showed alpha-gbc76c13 runs the redir-host DNS
+# chain correctly; a single bad build (alpha-94b13ae) was the actual culprit
+# of the DNS outage. If a bad core ever lands, rollback = reinstall previous
+# binary + /etc/init.d/openclash restart (symlink semantics: restart required).
+uci set openclash.config.auto_update='1'
+
 # ── Logging ───────────────────────────────────────────────────
 # yaml: log-level: warning → OpenClash UI level 0
 uci set openclash.config.log_level='0'

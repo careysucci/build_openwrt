@@ -132,7 +132,7 @@ _oc_find_asset() {
         ${GITHUB_TOKEN:+-H "Authorization: token $GITHUB_TOKEN"} \
         "$_api_url" 2>/dev/null \
     | jq -r --arg pat "$_pat" \
-        '[.[].assets[].browser_download_url | select(test($pat))] | first // ""' \
+        '[.[] | .assets[].browser_download_url | select(test($pat))] | first // ""' \
         2>/dev/null || true
 }
 
