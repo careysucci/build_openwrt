@@ -35,6 +35,23 @@ rm -rf "$TARGET_DIR"/feeds/small/luci-app-passwall2 2>/dev/null || true
 rm -rf "$TARGET_DIR"/feeds/small/mihomo 2>/dev/null || true
 rm -rf "$TARGET_DIR"/feeds/small/luci-app-mihomo 2>/dev/null || true
 
+# ===== Fix luci-app-netspeedtest stale dependency (LEDE only) =====
+# sirpdboy/netspeedtest still declares +python3-pkg-resources, which no longer
+# exists in the packages feed (setuptools dropped pkg_resources). The ipk then
+# fails rootfs install (package/install Error 255). Drop the dead dep.
+# Runs before the final 'feeds update' (git pull --ff-only), which preserves
+# this working-tree edit as long as upstream leaves the Makefile untouched.
+if [ "$TARGET_DIR" = "lede" ]; then
+    echo "[DIY-P2] Fixing luci-app-netspeedtest stale python3-pkg-resources dependency..."
+    NETSPEEDTEST_MK="$TARGET_DIR/feeds/netspeedtest/luci-app-netspeedtest/Makefile"
+    if [ -f "$NETSPEEDTEST_MK" ]; then
+        sed -i 's/ +python3-pkg-resources//g' "$NETSPEEDTEST_MK" || true
+        echo "[DIY-P2] netspeedtest dependency fix applied"
+    else
+        echo "[DIY-P2] netspeedtest feed not present, skipping"
+    fi
+fi
+
 # ===== Fix Rust LLVM issue (universal) =====
 echo "[DIY-P2] Fixing Rust LLVM configuration..."
 if [ -f "$TARGET_DIR/feeds/packages/lang/rust/Makefile" ]; then
