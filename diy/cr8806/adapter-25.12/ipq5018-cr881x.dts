@@ -51,9 +51,9 @@
 		ethernet0 = &dp1;
 		ethernet1 = &dp2;
 
-		led-boot = &led_system_blue;
+		led-boot = &led_system_red;
 		led-failsafe = &led_system_red;
-		led-running = &led_system_blue;
+		led-running = &led_internet_blue;
 		led-upgrade = &led_system_red;
 	};
 
@@ -97,25 +97,31 @@
 		 * (blue:status default-on on an unconnected pin) looked like every
 		 * LED was dead.
 		 *
-		 * Semantics: red means fault on router LEDs, so system red stays
-		 * OFF when healthy; internet blue carries the running indicator. */
+		 * Semantics (driven together with /usr/sbin/internet-led.sh):
+		 * booting     -> both RED lamps on (default-state below lights them
+		 *                as soon as gpio-leds probes, long before userspace)
+		 * ready       -> system red off (red = fault; there is NO system
+		 *                blue lamp, gpio24 is an unconnected pin)
+		 * internet up -> blue on / red off;  internet down -> red on / blue off */
 		led_system_red: led-1 {
 			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_RED>;
 			function = LED_FUNCTION_STATUS;
+			default-state = "on";
 		};
 		
 		led_internet_blue: led-2 {
 			gpios = <&tlmm 26 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_BLUE>;
 			function = LED_FUNCTION_WAN;
-			default-state = "on";
+			/* no default-state: managed by internet-led daemon */
 		};
 
 		led_internet_red: led-3 {
 			gpios = <&tlmm 27 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_RED>;
 			function = LED_FUNCTION_WAN;
+			default-state = "on";
 		};
 	};
 };

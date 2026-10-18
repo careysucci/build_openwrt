@@ -99,4 +99,20 @@ if [ -f "diy/common/netopt.sh" ] && [ -d "$TARGET_DIR/package/base-files/files/e
     echo "[DIY-AP] netopt installed and enabled (S99netopt)"
 fi
 
+# ===== Install internet-led daemon (CR881x LED state machine) =====
+# Boot: both red lamps on (DTS default-state); once userspace is up the
+# daemon turns system red off and drives the internet lamp by public
+# reachability (blue = up, red = down). Silently exits on boards without
+# the red:status/blue:wan/red:wan lamp set (e.g. CR880X).
+if [ -f "diy/cr8806/internet-led.sh" ] && [ -f "diy/cr8806/internet-led.init" ] && [ -d "$TARGET_DIR/package/base-files/files/etc/init.d" ]; then
+    mkdir -p "$TARGET_DIR/package/base-files/files/usr/sbin"
+    cp -f diy/cr8806/internet-led.sh "$TARGET_DIR/package/base-files/files/usr/sbin/internet-led.sh"
+    chmod +x "$TARGET_DIR/package/base-files/files/usr/sbin/internet-led.sh"
+    cp -f diy/cr8806/internet-led.init "$TARGET_DIR/package/base-files/files/etc/init.d/internet-led"
+    chmod +x "$TARGET_DIR/package/base-files/files/etc/init.d/internet-led"
+    mkdir -p "$TARGET_DIR/package/base-files/files/etc/rc.d"
+    ln -sf /etc/init.d/internet-led "$TARGET_DIR/package/base-files/files/etc/rc.d/S99internet-led"
+    echo "[DIY-AP] internet-led installed and enabled (S99internet-led)"
+fi
+
 echo "[DIY-AP] AP customization completed"

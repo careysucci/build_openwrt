@@ -1,0 +1,18 @@
+#!/bin/sh /etc/rc.common
+#
+# internet-led - CR881x LED state machine (boot red pair -> ready ->
+# internet blue/red driven by public reachability). See internet-led.sh
+# for the lamp semantics. procd-managed with respawn; no-op on boards
+# lacking the red:status/blue:wan/red:wan lamp set.
+
+START=99
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance internet-led
+    procd_set_param command /usr/sbin/internet-led.sh
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
