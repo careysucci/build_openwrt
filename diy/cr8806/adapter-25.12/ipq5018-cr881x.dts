@@ -95,12 +95,14 @@
 		 * internet red. gpio24 drives NOTHING - the QSDK-DTB-strings-derived
 		 * "sys_blue on gpio24" was a mis-binding, and is why a fresh flash
 		 * (blue:status default-on on an unconnected pin) looked like every
-		 * LED was dead. */
+		 * LED was dead.
+		 *
+		 * Semantics: red means fault on router LEDs, so system red stays
+		 * OFF when healthy; internet blue carries the running indicator. */
 		led_system_red: led-1 {
 			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_RED>;
 			function = LED_FUNCTION_STATUS;
-			default-state = "on";
 		};
 		
 		led_internet_blue: led-2 {
