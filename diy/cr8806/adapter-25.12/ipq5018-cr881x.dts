@@ -89,23 +89,25 @@
 		pinctrl-0 = <&led_pins>;
 		pinctrl-names = "default";
 
-		led_system_blue: led-0 {
-			gpios = <&tlmm 24 GPIO_ACTIVE_HIGH>;
-			color = <LED_COLOR_ID_BLUE>;
-			function = LED_FUNCTION_STATUS;
-			default-state = "on";
-		};
-
+		/* CR8816 LED map - field-verified by blink-signature sweep
+		 * (gpio24=x1 / gpio25=x2 / gpio26=x3 / gpio27=x4). Only THREE lamps
+		 * exist: gpio25 = system red, gpio26 = internet blue, gpio27 =
+		 * internet red. gpio24 drives NOTHING - the QSDK-DTB-strings-derived
+		 * "sys_blue on gpio24" was a mis-binding, and is why a fresh flash
+		 * (blue:status default-on on an unconnected pin) looked like every
+		 * LED was dead. */
 		led_system_red: led-1 {
 			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_RED>;
 			function = LED_FUNCTION_STATUS;
+			default-state = "on";
 		};
-
+		
 		led_internet_blue: led-2 {
 			gpios = <&tlmm 26 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_BLUE>;
 			function = LED_FUNCTION_WAN;
+			default-state = "on";
 		};
 
 		led_internet_red: led-3 {
