@@ -53,7 +53,7 @@
 
 		led-boot = &led_system_red;
 		led-failsafe = &led_system_red;
-		led-running = &led_internet_blue;
+		led-running = &led_system_red;
 		led-upgrade = &led_system_red;
 	};
 
@@ -97,12 +97,13 @@
 		 * (blue:status default-on on an unconnected pin) looked like every
 		 * LED was dead.
 		 *
-		 * Semantics (driven together with /usr/sbin/internet-led.sh):
-		 * booting     -> both RED lamps on (default-state below lights them
-		 *                as soon as gpio-leds probes, long before userspace)
-		 * ready       -> system red off (red = fault; there is NO system
-		 *                blue lamp, gpio24 is an unconnected pin)
-		 * internet up -> blue on / red off;  internet down -> red on / blue off */
+		 * Semantics: mirror the CR880X (Redmi AX3000) fleet standard, whose
+		 * system lamp is default-on from the gpio-leds probe and stays lit for
+		 * boot/running, and whose WAN lamps are never lit (no default-state,
+		 * no trigger, no daemon). The CR8816 has no blue system lamp (gpio24
+		 * is an unconnected pin), so the system position lights its only
+		 * available color (red) whenever the CR880X lights its system lamp.
+		 * The internet lamps stay dark at all times. */
 		led_system_red: led-1 {
 			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_RED>;
@@ -114,14 +115,13 @@
 			gpios = <&tlmm 26 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_BLUE>;
 			function = LED_FUNCTION_WAN;
-			/* no default-state: managed by internet-led daemon */
+			/* no default-state: WAN lamps stay dark (CR880X parity) */
 		};
 
 		led_internet_red: led-3 {
 			gpios = <&tlmm 27 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_RED>;
 			function = LED_FUNCTION_WAN;
-			default-state = "on";
 		};
 	};
 };
