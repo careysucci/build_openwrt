@@ -231,6 +231,9 @@ if [ "$(count_radios)" -ge 1 ]; then
 
     # Interface-level: identical SSID/key on both bands + 802.11r/k/v.
     # ft_psk_generate_local=1 → no R0KH/R1KH lists needed across APs.
+    # ft_over_ds=0 (over-the-air FT): the protocol the deployed fleet runs
+    # (.226/.248 wy_house, verified 2026-10-20) — every AP on one FT
+    # protocol; over-the-air has fewer client-side quirks than over-DS.
     i=0
     while uci -q get "wireless.@wifi-iface[$i]" >/dev/null 2>&1; do
         uci set "wireless.@wifi-iface[$i].ssid=WyHouse"
@@ -238,7 +241,7 @@ if [ "$(count_radios)" -ge 1 ]; then
         uci set "wireless.@wifi-iface[$i].key=wyhouse8888"
         uci set "wireless.@wifi-iface[$i].ieee80211r=1"
         uci set "wireless.@wifi-iface[$i].mobility_domain=8888"
-        uci set "wireless.@wifi-iface[$i].ft_over_ds=1"
+        uci set "wireless.@wifi-iface[$i].ft_over_ds=0"
         uci set "wireless.@wifi-iface[$i].ft_psk_generate_local=1"
         uci set "wireless.@wifi-iface[$i].ieee80211k=1"
         uci set "wireless.@wifi-iface[$i].ieee80211v=1"
