@@ -47,9 +47,12 @@
 #      via the switch CPU port, nothing to override
 #   3. System: hostname, timezone, LuCI language
 #   4. packet_steering=1: RX softirqs spread over both A53 cores
-#   5. Enables dual-band WiFi, same SSID on both bands — ONLY on a
-#      factory-fresh wireless config; a guard mirrors the LAN one, so a
-#      settings-kept sysupgrade never overwrites an admin-configured WLAN:
+#   5. Enforces the WiFi fleet standard at EVERY first boot - including
+#      the uci-defaults re-run after a settings-kept sysupgrade (NO
+#      factory-fresh guard; 2026-10-20 decision, rationale at the WiFi
+#      section): per-band SSIDs wy_house/wy_house_5G with SAE, 802.11r/k/v
+#      on mobility domain 8888. Manual tweaks hold until the next
+#      sysupgrade, which re-converges the box onto the standard:
 #      - PER-BOARD channel plan: the two deployed APs (CR880X + CR881x)
 #        broadcast the same SSIDs and must never share a channel
 #        (measured 2026-10-15: both on ch1+ch149 at -44..-74 dBm mutual
@@ -173,19 +176,18 @@ while [ "$(count_radios)" -lt 2 ] && [ "$n" -lt 60 ]; do
 done
 
 if [ "$(count_radios)" -ge 1 ]; then
-    # Factory-fresh guard (mirrors the LAN guard in section 1):
-    # uci-defaults also re-run after a settings-kept sysupgrade, and this
-    # section would otherwise OVERWRITE an admin-configured WLAN (an AP
-    # running SSID "wy_house" with SAE would be flipped to WyHouse/psk2
-    # and drop every client). Stock `wifi config` generates wifi-iface
-    # sections WITHOUT an ssid, so any non-empty ssid means the radios
-    # were configured by hand — keep them untouched.
-    wif_ssid="$(uci -q get "wireless.@wifi-iface[0].ssid")"
-    if [ -n "$wif_ssid" ]; then
-        echo "[99-ap-bridge] wifi already provisioned (ssid='$wif_ssid') — keeping it (settings-kept upgrade)"
-        echo "[99-ap-bridge] done. LuCI: http://172.16.3.19 (root, no password)"
-        exit 0
-    fi
+    # NO factory-fresh guard here - deliberate exception to the LAN guard
+    # in section 1 (2026-10-20 decision). uci-defaults re-run after every
+    # settings-kept sysupgrade, and the old "skip when an SSID exists"
+    # guard turned that re-run into a silent no-op: a box upgraded with
+    # its settings kept NEVER converged to this standard. That is exactly
+    # how the deployed .248 drifted (mobility_domain missing ->
+    # md5(ssid)-derived domain -> cross-AP FT broken, roaming clients
+    # stuck on 169.254.x). The template therefore re-asserts the fleet
+    # standard at EVERY first boot; manual tweaks made in between are
+    # consciously given up at the next sysupgrade. (The LAN guard stays:
+    # re-pinning a deployed box's management address would cut off
+    # remote access.)
 
     # Per-board channel plan: the two deployed APs broadcast the same
     # SSIDs and must never share a channel — measured 2026-10-15 with
@@ -229,29 +231,61 @@ if [ "$(count_radios)" -ge 1 ]; then
         r=$((r + 1))
     done
 
-    # Interface-level: identical SSID/key on both bands + 802.11r/k/v.
-    # ft_psk_generate_local=1 → no R0KH/R1KH lists needed across APs.
-    # ft_over_ds=0 (over-the-air FT): the protocol the deployed fleet runs
-    # (.226/.248 wy_house, verified 2026-10-20) — every AP on one FT
-    # protocol; over-the-air has fewer client-side quirks than over-DS.
+    # Interface-level: the fleet roaming standard - a mirror of the
+    # deployed .226/.248 wy_house network (field-verified 2026-10-20).
+    # Per-band SSID/encryption; identical FT parameters on every
+    # repo-built AP, so any two of them roam seamlessly out of the box -
+    # and a settings-kept sysupgrade re-converges a drifted box.
+    SSID_2G='wy_house'
+    SSID_5G='wy_house_5G'
+    KEY='Wy8889@$'
     i=0
     while uci -q get "wireless.@wifi-iface[$i]" >/dev/null 2>&1; do
-        uci set "wireless.@wifi-iface[$i].ssid=WyHouse"
-        uci set "wireless.@wifi-iface[$i].encryption=psk2"
-        uci set "wireless.@wifi-iface[$i].key=wyhouse8888"
+        dev="$(uci -q get "wireless.@wifi-iface[$i].device")"
+        band="$(uci -q get "wireless.$dev.band")"
+        case "$band" in
+            5g)
+                uci set "wireless.@wifi-iface[$i].ssid=$SSID_5G"
+                # WPA3-only on 5G (every fleet client is HE-capable);
+                # SAE makes PMF required (ieee80211w=2) by default
+                uci set "wireless.@wifi-iface[$i].encryption=sae"
+                ;;
+            *)
+                uci set "wireless.@wifi-iface[$i].ssid=$SSID_2G"
+                # sae-mixed on 2.4G keeps WPA2-only IoT clients online;
+                # PMF optional (ieee80211w=1) by default
+                uci set "wireless.@wifi-iface[$i].encryption=sae-mixed"
+                ;;
+        esac
+        uci set "wireless.@wifi-iface[$i].key=$KEY"
+        # 802.11r FT: mobility domain 8888 shared by every fleet AP,
+        # over-the-air FT (ft_over_ds=0 - the protocol the deployed
+        # fleet runs; fewer client-side quirks than over-DS). SAE forbids
+        # ft_psk_generate_local=1 (the SAE PMK comes from the handshake,
+        # not the passphrase): keep 0 and let hostapd derive the r0kh/r1kh
+        # wildcard keys as md5("mobility_domain/key") - identical on every
+        # AP sharing MD+key, which is what makes cross-AP FT work.
+        # pmk_r1_push=1: PMK-R1 pushed to peers proactively, no pull
+        # round-trip mid-roam.
         uci set "wireless.@wifi-iface[$i].ieee80211r=1"
         uci set "wireless.@wifi-iface[$i].mobility_domain=8888"
         uci set "wireless.@wifi-iface[$i].ft_over_ds=0"
-        uci set "wireless.@wifi-iface[$i].ft_psk_generate_local=1"
+        uci set "wireless.@wifi-iface[$i].ft_psk_generate_local=0"
+        uci set "wireless.@wifi-iface[$i].pmk_r1_push=1"
+        # 802.11k/v: neighbor reports + BSS transition - clients steer to
+        # the best AP instead of clinging to a weak one
         uci set "wireless.@wifi-iface[$i].ieee80211k=1"
         uci set "wireless.@wifi-iface[$i].ieee80211v=1"
+        uci set "wireless.@wifi-iface[$i].bss_transition=1"
+        uci set "wireless.@wifi-iface[$i].proxy_arp=1"
+        uci set "wireless.@wifi-iface[$i].ocv=0"
         # Keep weak-signal IoT clients attached (verified on-device)
         uci set "wireless.@wifi-iface[$i].disassoc_low_ack=0"
         uci set "wireless.@wifi-iface[$i].wmm=1"
         i=$((i + 1))
     done
     uci commit wireless
-    echo "[99-ap-bridge] WiFi up: 2.4G(HE40/ch$ch_2g) + 5G(HE80/ch$ch_5g), SSID=WyHouse, 802.11r/k/v on"
+    echo "[99-ap-bridge] WiFi up: 2.4G(HE40/ch$ch_2g) + 5G(HE80/ch$ch_5g), SSID=wy_house/wy_house_5G, 802.11r/k/v on"
 else
     echo "[99-ap-bridge] WARNING: no wifi-device in /etc/config/wireless after 60s"
     echo "[99-ap-bridge] WiFi NOT provisioned — exiting 1 to retry on next boot"
