@@ -74,6 +74,9 @@
 #        while CN regdb would only lower the ceilings (measured)
 #      - 802.11r/k/v fast roaming with a shared mobility domain
 #      - disassoc_low_ack=0: don't kick weak-signal IoT clients
+#   6. Internet lamp = WAN link indicator: blue:wan tracks the wan port
+#      carrier via the netdev trigger (hzyitc's ucidef_set_led_switch
+#      semantics ported to DSA - no ping/speed probes anywhere)
 #
 # Multi-AP roaming (valid once the boxes are converted to bridge mode):
 # flashing every box (CR880X and CR881x alike) with this same firmware gives them identical
@@ -290,6 +293,26 @@ else
     echo "[99-ap-bridge] WARNING: no wifi-device in /etc/config/wireless after 60s"
     echo "[99-ap-bridge] WiFi NOT provisioned — exiting 1 to retry on next boot"
     exit 1
+fi
+
+# ---- 4. LED: internet lamp tracks the WAN physical link -------------
+# hzyitc/openwrt-redmi-ax3000 defines the internet lamp as a WAN-port
+# link indicator (ucidef_set_led_switch on the switch port). That
+# swconfig trigger no longer exists on 25.12 DSA; the netdev trigger
+# with mode=link is the equivalent: blue lamp lit while the wan netdev
+# has carrier, dark otherwise. Guarded by sysfs presence so boards
+# without a blue:wan lamp pass through cleanly. The system lamp needs
+# nothing here - its boot/running/failsafe/upgrade states come from
+# the DTS led-* aliases (hzyitc definition, see the board DTS).
+if [ -d "/sys/class/leds/blue:wan" ]; then
+    uci -q delete system.wan_led
+    uci set system.wan_led=led
+    uci set system.wan_led.sysfs='blue:wan'
+    uci set system.wan_led.trigger='netdev'
+    uci set system.wan_led.dev='wan'
+    uci set system.wan_led.mode='link'
+    uci commit system
+    echo "[99-ap-bridge] internet lamp: blue:wan tracks the wan link (netdev trigger)"
 fi
 
 echo "[99-ap-bridge] done. LuCI: http://172.16.3.19 (root, no password)"
