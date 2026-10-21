@@ -138,6 +138,27 @@ for p in "$ADAPT_DIR"/patches-kernel/*.patch; do
 	install -Dm644 "$p" "$dest"
 done
 
+# --- 2c. mac80211 subsys patches (AP-side FT key upload race, openwrt#9071) --
+# 400-mac80211-defer-ap-side-ft-key-upload.patch: fixes the 802.11r roam
+# breaker where hostapd installs the FT PTK before the STA reaches ASSOC
+# and ieee80211_add_key() rejects it with -ENOENT ("nl80211: kernel
+# reports: key addition failed" — observed 19x in a single day's log on
+# a live CR8816 WPA3/PMF network, breaking fast transitions).
+# Based on the 25.12.6 refresh of openwrt PR #23181 by Andrea Covelli,
+# with one local deviation for ath11k (SW_CRYPTO_CONTROL) — rationale in
+# the patch header. Verified to apply cleanly after all 19 upstream
+# subsys patches (OpenWrt/ImmortalWrt openwrt-25.12) in quilt order.
+echo "--- Installing mac80211 subsys patches"
+for p in "$ADAPT_DIR"/patches-subsys/*.patch; do
+	name="$(basename "$p")"
+	dest="package/kernel/mac80211/patches/subsys/$name"
+	if [ -e "$dest" ]; then
+		echo "ERROR: patch slot already occupied upstream: $name" >&2
+		exit 1
+	fi
+	install -Dm644 "$p" "$dest"
+done
+
 # --- 3. In-place modifications ------------------------------------------------
 echo "--- Patching existing files"
 python3 "$ADAPT_DIR/apply-modifications.py"

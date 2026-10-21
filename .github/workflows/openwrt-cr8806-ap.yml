@@ -18,6 +18,9 @@
 #            + static BDFs from hzyitc/openwrt-redmi-ax3000, mainline v8
 #            YT921x DSA driver backport + REVSGMII hack (kernel 0913-0915,
 #            field-verified via the zcop build).
+#          - mac80211 subsys: 400-defer-ap-side-ft-key-upload — fixes the
+#            802.11r FT key-addition race that breaks WPA3/PMF roaming
+#            (openwrt#9071 / PR #23181, ath11k-adapted local refresh).
 #          Full ath11k stack: 2.4G (IPQ5018) + 5G (QCN6122) both work.
 # Profile: standard router — DHCP/firewall/WAN stock (PPPoE-ready), no
 #          proxy/NAS apps; first boot brands the box and provisions
@@ -235,7 +238,7 @@ jobs:
           echo "Target: ${{ env.RELEASE_NAME }} (qualcommax/ipq50xx, kernel 6.12)" >> release.txt
           echo "Devices: redmi_ax3000 (CR880X — QCA8337) + xiaomi_cr881x (CR8816/8818/8819 — YT9215)" >> release.txt
           echo "Mode: standard router — LAN pinned to 172.16.3.19/24 (management address) with DHCP server, routed WAN (DHCP client, PPPoE-ready), firewall on; CR880X WAN port conduit unified to eth1 (openwrt#24696 workaround); LuCI http://172.16.3.19 (root, no initial password)" >> release.txt
-          echo "WiFi: 2.4G+5G SSID 'WyHouse' (key wyhouse8888), 802.11r/k/v roaming enabled" >> release.txt
+          echo "WiFi: 2.4G+5G SSID 'WyHouse' (key wyhouse8888), 802.11r/k/v roaming enabled, mac80211 FT key-upload race fixed (openwrt#9071)" >> release.txt
           echo "Flash: *-squashfs-factory.ubi / *-squashfs-factory.img via U-boot TFTP | *-squashfs-sysupgrade.bin via LuCI" >> release.txt
           echo "CR8816 note: flash the *xiaomi_cr881x* image (the redmi_ax3000 image boots on a CR881x but no ethernet port comes up — different switch chip)" >> release.txt
           echo "Date: $(date)" >> release.txt
