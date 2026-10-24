@@ -59,7 +59,7 @@ tcp-concurrent: true
 find-process-mode: 'off'           # 关闭进程识别，OpenWrt上无意义，消除每连接的进程查找开销
 keep-alive-interval: 30            # TCP keepalive 30秒，维持长连接减少重连
 keep-alive-idle: 600               # 空闲连接600秒后才开始探测，减少无用探测包
-global-client-fingerprint: chrome  # 根键必须叫 global-client-fingerprint：写成 client-fingerprint 会被 mihomo 静默忽略，
+client-fingerprint: chrome  # 根键必须叫 global-client-fingerprint：已经被 mihomo 弃用，
                               # 订阅节点未自带指纹时回退 Go 默认 ClientHello（典型代理工具特征）。
                               # 生效后未显式配置指纹的节点（如 CF 中转 ws）统一伪装 Chrome TLS 指纹。
 log-level: warning

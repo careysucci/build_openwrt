@@ -54,7 +54,7 @@ tcp-concurrent: true
 find-process-mode: 'off'
 keep-alive-interval: 30
 keep-alive-idle: 600
-global-client-fingerprint: chrome
+client-fingerprint: chrome
 log-level: warning
 
 geodata-mode: true
