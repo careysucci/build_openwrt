@@ -1,0 +1,61 @@
+Revert "net: dsa: qca8k: Add support for force mode for fixed link topology"
+
+Linux 6.12.111 backported upstream commit e0a77b1ed9001bdd0c73b99c67abb90f4bd7d7f5.
+On the Redmi AX3000 / CR880X QCA8337 CPU port (port 0, SGMII fixed-link to
+IPQ5018 dp2), setting QCA8K_PORT_PAD_SGMII_FORCE_MODE breaks the switch-to-SoC
+receive path: LAN-port MIB RX and CPU-port MIB TX increase, while eth1 RX stays
+at zero. The same board works with the 6.12.108 behavior, before this bit was
+introduced. Restore that behavior until the board-specific fixed-link/UNIPHY
+initialization is updated and verified.
+
+This is a CR880X regression workaround; YT9215-based CR881x devices do not use
+qca8k and are unaffected.
+
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -1538,7 +1538,7 @@ static int qca8k_pcs_config(struct phylink_pcs *pcs, unsigned int neg_mode,
+ {
+ 	struct qca8k_priv *priv = pcs_to_qca8k_pcs(pcs)->priv;
+ 	int cpu_port_index, ret, port;
+-	u32 mask, reg, val;
++	u32 reg, val;
+ 
+ 	port = pcs_to_qca8k_pcs(pcs)->port;
+ 	switch (port) {
+@@ -1611,21 +1611,11 @@ static int qca8k_pcs_config(struct phylink_pcs *pcs, unsigned int neg_mode,
+ 	if (priv->ports_config.sgmii_tx_clk_falling_edge)
+ 		val |= QCA8K_PORT0_PAD_SGMII_TXCLK_FALLING_EDGE;
+ 
+-	mask = (val) ? (QCA8K_PORT0_PAD_SGMII_RXCLK_FALLING_EDGE |
+-			QCA8K_PORT0_PAD_SGMII_TXCLK_FALLING_EDGE) : 0;
+-
+-	/*
+-	 * (Un)set force mode on QCA8337 only, don't include it in the mask for
+-	 * others. It is written to the PORT0 PAD register for both port 0 and 6.
+-	 */
+-	if (priv->switch_id == QCA8K_ID_QCA8337) {
+-		if (neg_mode == PHYLINK_PCS_NEG_OUTBAND)
+-			val |= QCA8K_PORT_PAD_SGMII_FORCE_MODE;
+-		mask |= QCA8K_PORT_PAD_SGMII_FORCE_MODE;
+-	}
+-
+-	if (mask)
+-		ret = qca8k_rmw(priv, reg, mask, val);
++	if (val)
++		ret = qca8k_rmw(priv, reg,
++				QCA8K_PORT0_PAD_SGMII_RXCLK_FALLING_EDGE |
++				QCA8K_PORT0_PAD_SGMII_TXCLK_FALLING_EDGE,
++				val);
+ 
+ 	return 0;
+ }
+--- a/drivers/net/dsa/qca/qca8k.h
++++ b/drivers/net/dsa/qca/qca8k.h
+@@ -58,7 +58,6 @@
+ #define	  QCA8K_PORT_PAD_RGMII_TX_DELAY_EN		BIT(25)
+ #define   QCA8K_PORT_PAD_RGMII_RX_DELAY_EN		BIT(24)
+ #define   QCA8K_PORT_PAD_SGMII_EN			BIT(7)
+-#define   QCA8K_PORT_PAD_SGMII_FORCE_MODE		BIT(3)
+ #define QCA8K_REG_PWS					0x010
+ #define   QCA8K_PWS_POWER_ON_SEL			BIT(31)
+ /* This reg is only valid for QCA832x and toggle the package

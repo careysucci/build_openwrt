@@ -74,9 +74,8 @@
 #        while CN regdb would only lower the ceilings (measured)
 #      - 802.11r/k/v fast roaming with a shared mobility domain
 #      - disassoc_low_ack=0: don't kick weak-signal IoT clients
-#   6. Internet lamp = WAN link indicator: blue:wan tracks the wan port
-#      carrier via the netdev trigger (hzyitc's ucidef_set_led_switch
-#      semantics ported to DSA - no ping/speed probes anywhere)
+#   6. LEDs: CR881x uses its field-verified static system/internet lamps;
+#      CR880X blue:wan tracks WAN carrier through the netdev trigger
 #
 # Multi-AP roaming (valid once the boxes are converted to bridge mode):
 # flashing every box (CR880X and CR881x alike) with this same firmware gives them identical
@@ -295,16 +294,17 @@ else
     exit 1
 fi
 
-# ---- 4. LED: internet lamp tracks the WAN physical link -------------
-# hzyitc/openwrt-redmi-ax3000 defines the internet lamp as a WAN-port
-# link indicator (ucidef_set_led_switch on the switch port). That
-# swconfig trigger no longer exists on 25.12 DSA; the netdev trigger
-# with mode=link is the equivalent: blue lamp lit while the wan netdev
-# has carrier, dark otherwise. Guarded by sysfs presence so boards
-# without a blue:wan lamp pass through cleanly. The system lamp needs
-# nothing here - its boot/running/failsafe/upgrade states come from
-# the DTS led-* aliases (hzyitc definition, see the board DTS).
-if [ -d "/sys/class/leds/blue:wan" ]; then
+# ---- 4. LED defaults ------------------------------------------------
+# CR881x has no physical lamp on gpio24. Its DTS lights the verified
+# gpio25 system and gpio26 internet lamps directly. Remove the older
+# dynamic WAN override as well, otherwise a settings-kept sysupgrade
+# would let led init replace blue:wan's default-on state again.
+if [ "$board" = "xiaomi,cr881x" ]; then
+    uci -q delete system.wan_led
+    uci commit system
+    echo "[99-ap-bridge] CR881x LEDs: system + internet default-on (field-verified GPIO map)"
+elif [ -d "/sys/class/leds/blue:wan" ]; then
+    # CR880X: blue WAN lamp tracks physical WAN carrier through DSA.
     uci -q delete system.wan_led
     uci set system.wan_led=led
     uci set system.wan_led.sysfs='blue:wan'
