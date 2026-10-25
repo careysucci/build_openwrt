@@ -51,9 +51,9 @@
 		ethernet0 = &dp1;
 		ethernet1 = &dp2;
 
-		led-boot = &led_system_red;
+		led-boot = &led_system_blue;
 		led-failsafe = &led_system_red;
-		led-running = &led_system_red;
+		led-running = &led_system_blue;
 		led-upgrade = &led_system_red;
 	};
 
@@ -89,20 +89,21 @@
 		pinctrl-0 = <&led_pins>;
 		pinctrl-names = "default";
 
-		/* CR8816 LED map - field-verified by blink-signature sweep
-		 * (gpio24=x1 / gpio25=x2 / gpio26=x3 / gpio27=x4). Only THREE lamps
-		 * exist: gpio25 = system red, gpio26 = internet blue, gpio27 =
-		 * internet red. gpio24 drives NOTHING; binding boot/running to a
-		 * phantom blue system lamp leaves the physical system position dark.
-		 *
-		 * The deployed unit uses the verified static indication: system red
-		 * and internet blue are on, internet red stays off. All led-* aliases
-		 * use the only physical system lamp. */
+		/* Standard LED roles and GPIO assignments. A blink-signature sweep
+		 * found no physical lamp on gpio24 of the deployed CR8816, but that
+		 * must not change the color semantics or move system to the red LED.
+		 * If the blue system lamp is absent, its position simply stays dark. */
+		led_system_blue: led-0 {
+			gpios = <&tlmm 24 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_BLUE>;
+			function = LED_FUNCTION_STATUS;
+			default-state = "on";
+		};
+
 		led_system_red: led-1 {
 			gpios = <&tlmm 25 GPIO_ACTIVE_HIGH>;
 			color = <LED_COLOR_ID_RED>;
 			function = LED_FUNCTION_STATUS;
-			default-state = "on";
 		};
 
 		led_internet_blue: led-2 {

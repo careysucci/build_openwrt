@@ -135,6 +135,26 @@ jobs:
           git clone $REPO_URL -b $REPO_BRANCH ${{ env.TARGET_MATRIX }}
           ln -sf /workdir/${{ env.TARGET_MATRIX }} $GITHUB_WORKSPACE/${{ env.TARGET_MATRIX }}
 
+      - name: Fix official qca-ssdk archive hash
+        working-directory: /workdir/${{ env.TARGET_MATRIX }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('package/kernel/qca-ssdk/Makefile')
+          text = path.read_text()
+          source = 'PKG_SOURCE_VERSION:=bb4f3f0b947ebfce51c78a8d39f57c7c758521c9'
+          broken = 'PKG_MIRROR_HASH:=4f0628b9c99403588cb10223a03c456a8f7594f5d233ec11e745a237bf3357fb'
+          fixed = 'PKG_MIRROR_HASH:=da990d2956db471071568fd6c7c9193b075f9a1e87e5ae5ac8729cc4dba9dc24'
+          if source in text and broken in text:
+              path.write_text(text.replace(broken, fixed, 1))
+              print('Corrected qca-ssdk mirror hash for bb4f3f0b')
+          elif source in text and fixed in text:
+              print('qca-ssdk mirror hash is already correct')
+          else:
+              print('qca-ssdk source package changed; leaving upstream Makefile untouched')
+          PY
+
       - name: Free up disk space
         env:
           DEBIAN_FRONTEND: noninteractive
