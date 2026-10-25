@@ -16,12 +16,17 @@
 # Manual bridge-AP conversion (do it ONLY when you actually want it):
 #   1. LuCI → Network → Interfaces → Devices → br-lan → add port 'wan'
 #   2. LuCI → Network → Interfaces → delete wan & wan6; edit lan →
-#      static address of the MAIN LAN (IP / mask / gateway / DNS)
+#      protocol 'DHCP client' (management IP / gateway / DNS then all
+#      come from the MAIN router; pin a FIXED LEASE for the AP's br-lan
+#      MAC on the main router so the management address stays constant)
 #   3. LuCI → Network → DHCP/DNS → disable DHCP on lan
 #   4. LuCI → System → Startup → disable firewall + dnsmasq
 #   (equivalent uci: add 'wan' to the br-lan device ports; delete
-#    network.wan / network.wan6; network.lan proto=static + ipaddr/
-#    netmask/gateway/dns; dhcp.lan.ignore=1; disable both services)
+#    network.wan / network.wan6; network.lan proto=dhcp; dhcp.lan.ignore=1;
+#    disable both services; point /etc/resolv.conf at resolv.conf.auto).
+#   Boxes converted this way are re-converged automatically at EVERY
+#   first boot after a settings-kept sysupgrade (see section 1b below),
+#   so no hand-written gateway/DNS can linger on an AP.
 #
 # Runs once at first boot, from uci_apply_defaults inside
 # /etc/init.d/boot (START=10) — i.e. after kmodloader and BEFORE netifd
@@ -74,8 +79,9 @@
 #        while CN regdb would only lower the ceilings (measured)
 #      - 802.11r/k/v fast roaming with a shared mobility domain
 #      - disassoc_low_ack=0: don't kick weak-signal IoT clients
-#   6. LEDs: CR881x uses its field-verified static system/internet lamps;
-#      CR880X blue:wan tracks WAN carrier through the netdev trigger
+#   6. LEDs: CR881x uses the standard blue system (gpio24) and blue
+#      internet (gpio26) roles; CR880X blue:wan tracks WAN carrier
+#      through the netdev trigger
 #
 # Multi-AP roaming (valid once the boxes are converted to bridge mode):
 # flashing every box (CR880X and CR881x alike) with this same firmware gives them identical
@@ -129,6 +135,47 @@ else
     echo "[99-ap-bridge] lan already at $lan_cur_ip — keeping it (settings-kept upgrade)"
 fi
 uci set network.globals.packet_steering='1'
+
+# ---- 1b. Bridged-AP convergence: management IP/gateway/DNS via DHCP ---
+# A box ALREADY converted to a bridged AP (2026-10-25 decision) must not
+# keep hand-pinned gateway/DNS: it is a pure L2 AP whose own management
+# address, default route and resolver all follow the MAIN router's DHCP.
+# Match ONLY that state: wan & wan6 deleted and DHCP server off on lan.
+# A factory-fresh standard router has wan and a running DHCP server, so
+# it never matches and section 1's guard plus router-mode defaults stay
+# exactly as before. The convergence is idempotent and runs at EVERY
+# first boot, so an already-DHCP AP still gets the service/resolver
+# cleanup below.
+# Prerequisite: pin a FIXED LEASE for the AP's br-lan MAC on the main
+# router, else the management address comes from the DHCP pool.
+if ! uci -q get network.wan >/dev/null 2>&1 && \
+   ! uci -q get network.wan6 >/dev/null 2>&1 && \
+   [ "$(uci -q get dhcp.lan.ignore)" = "1" ]; then
+    if [ "$(uci -q get network.lan.proto)" = "static" ]; then
+        uci set network.lan.proto='dhcp'
+        uci -q delete network.lan.ipaddr
+        uci -q delete network.lan.netmask
+        uci -q delete network.lan.gateway
+        uci -q delete network.lan.dns
+        uci -q delete network.lan.peerdns
+        echo "[99-ap-bridge] bridged AP: lan -> DHCP client (IP/gateway/DNS from main router)"
+    fi
+    # dnsmasq is disabled on a bridged AP, so its /tmp/resolv.conf is
+    # never written. Point /etc/resolv.conf at netifd's resolv.conf.auto
+    # instead — the DHCP-pushed upstream DNS then works with no dnsmasq.
+    if [ "$(readlink /etc/resolv.conf)" != "/tmp/resolv.conf.d/resolv.conf.auto" ]; then
+        rm -f /etc/resolv.conf
+        ln -s /tmp/resolv.conf.d/resolv.conf.auto /etc/resolv.conf
+    fi
+    # Pure L2 AP: nothing on the box may offer addresses (dnsmasq DHCP,
+    # odhcpd RA/DHCPv6) and the firewall is unnecessary overhead.
+    for svc in dnsmasq odhcpd firewall; do
+        if [ -x "/etc/init.d/$svc" ] && /etc/init.d/$svc enabled; then
+            /etc/init.d/$svc disable
+            echo "[99-ap-bridge] bridged AP: $svc disabled"
+        fi
+    done
+fi
 # WAN conduit -> eth1: CR880X ONLY. On the CR880X the wan port ships on
 # conduit eth0 (GMAC0 PHY-to-PHY into QCA8337 port 5) and that path has
 # NO working RX on the mainline qca8k driver (openwrt#24696, same wiring
