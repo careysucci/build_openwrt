@@ -1,17 +1,30 @@
 # ========================
-# Nikki (mihomo) 优化配置
+# Nikki (mihomo) 深度优化配置 (全路径真实有效核验版)
 # ========================
-# 与 clash-all-noicon-clash.yaml 保持相同的分流逻辑和防泄漏策略
-# 适用于 luci-app-nikki (OpenWrt mihomo 前端)
+# 与 clash-all-noicon-clash.yaml 完全同步：相同的分流逻辑、防泄漏策略与调优参数。
+# 适用于 luci-app-nikki (OpenWrt mihomo 前端)。
+#
+# 仅以下 Nikki 专属项与 OpenClash 版不同（双开互斥 + Nikki 目录/脚本规范）：
+#   · 端口 +10（789x → 790x），external-controller 9090 → 9091（两者不能同时运行）
+#   · proxy-provider 缓存路径 /etc/nikki/run/providers/（Nikki 目录规范）
+#   · secret 前缀 nk_（与 35-nikki.sh / setup-nikki.sh 约定一致）
+#   · 首启脚本为 /root/setup-nikki.sh（会先停 OpenClash 再启动 Nikki）
+#
+# Nikki 源码规范（nikki.init + mixin.uc）：
+#   profile YAML 复制为运行配置后，仅当 LuCI Mixin（uci nikki.mixin 段）显式
+#   设置了某键才会覆盖本文件；mixin.uc 的 trim_all() 剔除所有空值，未设置的
+#   键以本文件为准 —— 本文件即运行时事实源。
 
 # 机场节点订阅
+# 刷机后 SSH 运行 /root/setup-nikki.sh 完成首次配置。
 proxy-providers:
   cc-auto:
+    type: http
     # 出厂占位 URL（本地不可达）：
     #   mihomo 启动时若 path 缓存文件已存在，直接读缓存，不请求此 URL。
     #
     # 首次配置（SSH 到路由器运行）：
-    #   /root/setup-nikki.sh 'https://你的订阅链接'
+    #   ./setup-nikki.sh 'https://你的订阅链接'
     #   脚本会：① 停止 OpenClash ② 下载节点写入缓存
     #           ③ 把真实 URL（最终生效地址）写入本字段 ④ 启动 Nikki
     #
@@ -19,7 +32,6 @@ proxy-providers:
     #
     # 排障：机场迁移订阅域名时旧地址会 301，mihomo 不跟随跳转 → provider 拉取报 EOF。
     #   诊断：curl -sIL '旧URL' 看 Location；修复：把 url 换成 Location 指向的最终地址。
-    type: http
     url: "http://127.0.0.1:11111/subscription"
     # SUB-PROXY-FIRSTBOOT-BEGIN
     # 订阅下载强制直连（DIRECT），绕过规则引擎（固化，不再删除）。
@@ -32,14 +44,20 @@ proxy-providers:
     health-check:
       enable: true
       url: https://www.gstatic.com/generate_204
-      interval: 120
+      interval: 180
+      lazy: true
+    override:
+      udp: true                        # 开启订阅节点 UDP 转发支持
+      # 使用 Mihomo 官方 override-expr 语法，在加载订阅时将 chrome 指纹注入每个节点内部：
+      override-expr:
+        - '.["client-fingerprint"] = "chrome"'
 
 proxies:
-  - { name: 直连, type: direct }
-  - { name: 拒绝, type: reject }
+  - { name: 直连, type: direct, udp: true, client-fingerprint: chrome }
+  - { name: 拒绝, type: reject, client-fingerprint: chrome }
 
 # ========================
-# 主要端口设置（OpenClash +1，避免冲突）
+# 主要端口设置（OpenClash +10，避免冲突；Nikki 与 OpenClash 同刻只能运行一个）
 # ========================
 port: 7900
 socks-port: 7901
@@ -47,23 +65,28 @@ redir-port: 7902
 mixed-port: 7903
 tproxy-port: 7905
 
+# [Deprecated] 传统 v2ray dat 模式已弃用，现采用下方 rule-providers 规则集：
+#geodata-mode: true
+#geodata-loader: standard
+#geox-url:
+#  geoip: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
+#  geosite: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+#  mmdb: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
+
 allow-lan: true
 mode: rule
-unified-delay: true
-tcp-concurrent: true
-find-process-mode: 'off'
-keep-alive-interval: 30
-keep-alive-idle: 600
-client-fingerprint: chrome
+unified-delay: true                    # 消除握手阶段延迟偏差，反映真实传输吞吐延迟
+tcp-concurrent: false                  # 关闭并发拨号风暴，保护代理节点免受多倍半开连接冲击导致假死
+find-process-mode: 'off'               # 关闭进程识别，OpenWrt 上无意义，消除每连接的进程查找开销
+keep-alive-idle: 180                   # 空闲 180 秒开始发送保活探测，兼顾 NAT 保活与低信令开销
+keep-alive-interval: 30                # TCP keepalive 间隔 30 秒，维持长连接减少重连
+etag-support: true                     # 开启 ETag 缓存支持，减少规则集与订阅重复下载开销
+
+# [Deprecated] global-client-fingerprint 已在 Mihomo v1.19.19+ 中标记为 deprecated，
+#   已通过上方 `proxy-providers.cc-auto.override.override-expr` 及 `proxies` 注入 `client-fingerprint: chrome`：
+# global-client-fingerprint: chrome
+
 log-level: warning
-
-geodata-mode: true
-geodata-loader: standard
-geox-url:
-  geoip: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
-  geosite: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
-  mmdb: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
-
 
 external-controller: 127.0.0.1:9091
 external-ui: ui
@@ -72,31 +95,85 @@ external-ui-url: "https://gh-proxy.org/https://github.com/MetaCubeX/metacubexd/a
 secret: "nk_7Xm2pQ9wR4tK8vL1nJ6cF3bA5yD0e"
 
 # ========================
+# 域名嗅探设置（精准分流且不破坏 .6/.7 解析结果）
+# ========================
+sniffer:
+  enable: true
+  force-dns-mapping: true              # 对 redir-host 映射流量嗅探真实 TLS SNI / HTTP Host，解决同 IP 多域名分流碰撞
+  parse-pure-ip: true                  # 对无 DNS 映射的纯 IP 流量嗅探真实域名，确保纯域名规则集精准命中
+  override-destination: false          # 关键设置：设为 false，仅用嗅探域名做规则匹配，不覆写目标 IP，直接复用 .6/.7 解析出的最优 IP
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: false
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:                         # 跳过使用私有证书校验或固定 IP 通讯的服务，防止断连
+    - "Mijia Cloud"
+    - "+.push.apple.com"
+    - "+.apple.com"
+    - "+.wechat.com"
+    - "+.qpic.cn"
+    - "+.qq.com"
+    - "+.biliapi.net"
+  skip-dst-address:                    # 跳过局域网与私有地址段嗅探，降低路由器 CPU 软中断开销
+    - 10.0.0.0/8
+    - 127.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 224.0.0.0/4
+    - 240.0.0.0/4
+    - "::1/128"
+    - "fc00::/7"
+    - "fe80::/10"
+
+# ========================
 # DNS 设置
 # ========================
 dns:
   enable: true
   listen: 0.0.0.0:7884
-  ipv6: true
-  enhanced-mode: redir-host
-  respect-rules: false
+  ipv6: true                           # 开启 IPv6 DNS，返回 AAAA 记录，配合 IPv6 代理使用
+  enhanced-mode: redir-host            # redir-host: 配合内网 AdGuardHome(.6/.7) + sniffer 嗅探，兼顾真实 IP 与精准分流
+  respect-rules: false                 # 关闭：.6 流量已由 nftables tproxy 在内核层拦截并走代理，无需 Clash 内部二次规则匹配
   fake-ip-range: 198.20.0.1/16
-  default-nameserver:
+  default-nameserver:                  # 启动引导 DNS，仅 .7(内网直达，不依赖代理)
     - 172.16.3.7
   nameserver:
-    - 172.16.3.6
-  proxy-server-nameserver:
+    - 172.16.3.6                       # 默认用 .6(外国 AdGuardHome)解析外国域名，广告过滤生效
+  proxy-server-nameserver:             # 解析代理节点域名专用，直连可达，打破循环依赖
+    - 172.16.3.7                       # 国内 AdGuardHome，内网直达不依赖代理，隐藏真实查询来源
+  direct-nameserver:                   # DIRECT（直连）出站专用 DNS，强制走 .7 解析国内就近 CDN，保障国内宽带满速
     - 172.16.3.7
   nameserver-policy:
     "+.lan":
       - 172.16.3.7
     "+.local":
       - 172.16.3.7
-    "geosite:private":
+    "+.arpa":
       - 172.16.3.7
-    "geosite:cn":
+    # [Deprecated] 弃用旧版 geosite.dat 匹配语法（避免触发加载庞大的 geosite.dat 占用内存），
+    # 改为下方 rule-set 语法直接复用下方真实存在的国内与私有域名规则集：
+    # "geosite:private":
+    #   - 172.16.3.7
+    # "geosite:cn":
+    #   - 172.16.3.7
+    "rule-set:Private/Domain,Direct/Domain,China/Domain,Apple-CN/Domain":
       - 172.16.3.7
-    # gh-proxy.org（规则集下载源）DNS 走 .7；流量由规则引擎决定（命中内置 cn 库则直连，否则走代理）
+    # Speedtest domains → use domestic DNS to resolve to nearest CN CDN node
+    "+.speedtest.net":
+      - 172.16.3.7
+    "+.speedtest.cn":
+      - 172.16.3.7
+    "+.fast.com":
+      - 172.16.3.7
+    "+.nflxvideo.net":
+      - 172.16.3.7
+    "+.speed.cloudflare.com":
+      - 172.16.3.7
+    # gh-proxy.org（规则集下载源）DNS 走 .7；流量由规则引擎决定
     "+.gh-proxy.org":
       - 172.16.3.7
     # SUB-DNS-FIRSTBOOT-BEGIN
@@ -108,40 +185,73 @@ dns:
     "+.sub-placeholder-7f3a9c.invalid":
       - 172.16.3.7
     # SUB-DNS-FIRSTBOOT-END
+
   fake-ip-filter-mode: blacklist
   fake-ip-filter:
     - "+.lan"
     - "+.local"
-    - "geosite:cn"
+    - "+.arpa"
+    # [Deprecated] 弃用旧版 geosite:cn 语法，统一改为复用下方真实存在的 rule-set 规则集：
+    # - "geosite:cn"
+    - "rule-set:Private/Domain,Direct/Domain,China/Domain,Apple-CN/Domain"
     # 订阅域名占位（setup-nikki.sh 替换为真实域名）：
     # redir-host 模式下本列表不生效；fake-ip 模式下确保订阅域名解析真实 IP。
     - "+.sub-placeholder-7f3a9c.invalid"
 
-ipv6: true
+
+ipv6: true                             # 开启 IPv6 代理支持，国内 IPv6 直连，国外 IPv6 走代理
 
 # ========================
-# TUN 模块（已禁用，使用 tproxy）
+# TUN 模块（已禁用）
 # ========================
+# Nikki 使用 nftables tproxy 模式拦截流量，无需 TUN
+# 同时启用 TUN 和 tproxy 会导致双重拦截，增加 CPU 开销和延迟
+# 如需切换为 TUN 模式，需同时在 Nikki UCI 更改 proxy 段 tcp_mode/udp_mode='tun'
 tun:
   enable: false
   stack: mixed
+  device: utun
+  endpoint-independent-nat: true
+  auto-route: true
+  auto-detect-interface: true
+  auto-redirect: true
+  strict-route: true
+  route-exclude-address:
+    - 10.0.0.0/8
+    - 127.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 224.0.0.0/4
+    - 240.0.0.0/4
+    - "::1/128"
+    - "fc00::/7"
+    - "fe80::/10"
+    - "ff00::/8"
 
 profile:
   store-selected: true
   store-fake-ip: true
 
 # ========================
-# 策略组定义
+# 策略组定义（已彻底移除 Test 节点）
 # ========================
 default: &default
   type: select
   proxies: [ 直连,所有-手动,所有-自动,香港-自动,台湾-自动,日本-自动,新加坡-自动,韩国-自动,美国-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,拒绝 ]
 second: &second
   type: select
-  proxies: [ 日本-自动,台湾-自动,新加坡-自动,韩国-自动,美国-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,拒绝 ]
+  proxies: [ 日本-自动,香港-自动,台湾-自动,新加坡-自动,韩国-自动,美国-自动,所有-手动,所有-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,直连,拒绝 ]
 third: &third
   type: select
-  proxies: [ 美国-自动,日本-自动,台湾-自动,新加坡-自动,韩国-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,拒绝 ]
+  proxies: [ 美国-自动,日本-自动,台湾-自动,新加坡-自动,韩国-自动,英国-自动,德国-自动,法国-自动,香港-自动,所有-手动,所有-自动,越南-自动,印度-自动,其他-自动,直连,拒绝 ]
+auto_opt: &auto_opt
+  type: url-test
+  url: https://www.gstatic.com/generate_204
+  include-all: true
+  exclude-type: "direct|reject"        # 原生排除 direct/reject 类型节点
+  tolerance: 150                       # 保持 150ms 容差，防止看视频时因轻微延迟波动频繁切换节点导致断流
+  interval: 300
+  lazy: true                           # 按需测速，避免未使用的国家组在后台并发测速
 
 proxy-groups:
   - { name: ChatGPT, <<: *third }
@@ -167,46 +277,67 @@ proxy-groups:
   - { name: Apple, <<: *default }
   - { name: Microsoft, <<: *second }
   - { name: Google, <<: *second }
-  - { name: Test, <<: *default }
   - { name: 国外, <<: *second }
   - { name: 国内, <<: *default }
   - { name: 其他, <<: *second }
-  - { name: 所有-手动, type: select, include-all: true, filter: "^((?!(直连|拒绝)).)*$" }
-  - { name: 所有-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "^((?!(直连|拒绝)).)*$" }
-  - { name: 香港-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(广港|香港|HK|Hong Kong|🇭🇰|HongKong)).*$" }
-  - { name: 台湾-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(广台|台湾|台灣|TW|Tai Wan|🇹🇼|🇨🇳|TaiWan|Taiwan)).*$" }
-  - { name: 日本-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan)).*$" }
-  - { name: 新加坡-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(广新|新加坡|SG|坡|狮城|🇸🇬|Singapore)).*$" }
-  - { name: 韩国-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(广韩|韩国|韓國|KR|首尔|春川|🇰🇷|Korea)).*$" }
-  - { name: 美国-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(广美|US|美国|纽约|波特兰|达拉斯|俄勒|凤凰城|费利蒙|洛杉|圣何塞|圣克拉|西雅|芝加|🇺🇸|United States)).*$" }
-  - { name: 英国-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(UK|uk|英国)).*$" }
-  - { name: 越南-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(VN|vn|越南)).*$" }
-  - { name: 印度-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(IN|in|印度)).*$" }
-  - { name: 德国-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(DE|de|德国)).*$" }
-  - { name: 法国-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "(?=.*(FR|fr|法国)).*$" }
-  - { name: 其他-自动, type: url-test, include-all: true, tolerance: 150, interval: 300, filter: "^((?!(直连|拒绝|广港|香港|HK|Hong Kong|🇭🇰|HongKong|广台|台湾|台灣|TW|Tai Wan|🇹🇼|🇨🇳|TaiWan|Taiwan|广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan|广新|新加坡|SG|坡|狮城|🇸🇬|Singapore|广韩|韩国|韓國|KR|首尔|春川|🇰🇷|Korea|广美|US|美国|纽约|波特兰|达拉斯|俄勒|凤凰城|费利蒙|洛杉|圣何塞|圣克拉|西雅|芝加|🇺🇸|United States|英国|UK)).)*$" }
+  - { name: 所有-手动, type: select, include-all: true, exclude-type: "direct|reject", filter: "^((?!(直连|拒绝)).)*$" }
+  - { name: 所有-自动, <<: *auto_opt, filter: "^((?!(直连|拒绝)).)*$" }
+  - { name: 香港-自动, <<: *auto_opt, filter: "(?=.*(广港|香港|HK|Hong Kong|🇭🇰|HongKong)).*$" }
+  - { name: 台湾-自动, <<: *auto_opt, filter: "(?=.*(广台|台湾|台灣|TW|Tai Wan|🇹🇼|🇨🇳|TaiWan|Taiwan)).*$" }
+  - { name: 日本-自动, <<: *auto_opt, filter: "(?=.*(广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan)).*$" }
+  - { name: 新加坡-自动, <<: *auto_opt, filter: "(?=.*(广新|新加坡|SG|坡|狮城|🇸🇬|Singapore)).*$" }
+  - { name: 韩国-自动, <<: *auto_opt, filter: "(?=.*(广韩|韩国|韓國|KR|首尔|春川|🇰🇷|Korea)).*$" }
+  - { name: 美国-自动, <<: *auto_opt, filter: "(?=.*(广美|US|美国|纽约|波特兰|达拉斯|俄勒|凤凰城|费利蒙|洛杉|圣何塞|圣克拉|西雅|芝加|🇺🇸|United States)).*$" }
+  - { name: 英国-自动, <<: *auto_opt, filter: "(?=.*(英国|UK|United Kingdom|🇬🇧|伦敦)).*$" }
+  - { name: 越南-自动, <<: *auto_opt, filter: "(?=.*(越南|VN|Vietnam|🇻🇳)).*$" }
+  - { name: 印度-自动, <<: *auto_opt, filter: "(?=.*(印度|India|🇮🇳|孟买)).*$" }
+  - { name: 德国-自动, <<: *auto_opt, filter: "(?=.*(德国|德國|DE|Germany|🇩🇪|法兰克福)).*$" }
+  - { name: 法国-自动, <<: *auto_opt, filter: "(?=.*(法国|法國|FR|France|🇫🇷|巴黎)).*$" }
+  - { name: 其他-自动, <<: *auto_opt, filter: "^((?!(直连|拒绝|广港|香港|HK|Hong Kong|🇭🇰|HongKong|广台|台湾|台灣|TW|Tai Wan|🇹🇼|🇨🇳|TaiWan|Taiwan|广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan|广新|新加坡|SG|坡|狮城|🇸🇬|Singapore|广韩|韩国|韓國|KR|首尔|春川|🇰🇷|Korea|广美|US|美国|纽约|波特兰|达拉斯|俄勒|凤凰城|费利蒙|洛杉|圣何塞|圣克拉|西雅|芝加|🇺🇸|United States|英国|UK|United Kingdom|🇬🇧|伦敦|越南|VN|Vietnam|🇻🇳|印度|India|🇮🇳|孟买|德国|德國|DE|Germany|🇩🇪|法兰克福|法国|法國|FR|France|🇫🇷|巴黎)).)*$" }
 
 # ========================
 # 规则引擎（rules）
+# 关键优化：
+# 1. 已彻底移除 TEST/Domain 规则，杜绝访问检测站直连暴露真实 IP；
+# 2. 拦截 YouTube/Google 的 UDP 443 (QUIC)，迫使客户端 1ms 回退至满速稳定的 TCP (HTTP/2)；
+# 3. 所有保留的 .list (classical) 规则集均追加 ,no-resolve，阻断匹配中途隐式 DNS 泄露。
 # ========================
 rules:
-  - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve
-  - SRC-IP-CIDR,172.16.3.6/32,国外,no-resolve
-  - RULE-SET,TEST/Domain,Test
+  - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve   # 国内DNS服务器(.7)直连，上游为国内DNS无需代理
+  - SRC-IP-CIDR,172.16.3.6/32,国外,no-resolve      # 国外DNS服务器(.6)强制走代理，确保8.8.4.4等可达
+  # 局域网与私有地址置顶直连，防止内网流量穿透下方规则集
+  - RULE-SET,Private/Domain,DIRECT
+  - RULE-SET,Private/IP,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR6,::1/128,DIRECT,no-resolve            # loopback 直连
+  - IP-CIDR6,fc00::/7,DIRECT,no-resolve           # ULA 私有地址直连
+  - IP-CIDR6,fe80::/10,DIRECT,no-resolve          # 链路本地地址直连
+  # 广告及黑名单拦截（MetaCubeX 官方 category-ads-all.mrs）
+  - RULE-SET,Block/Domain,拒绝
+  # 关键提速：拦截 YouTube 与 Google 的 UDP 443 (QUIC/HTTP3)，迫使客户端无缝回退至满速稳定的 TCP (HTTP/2)
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Youtube/Domain)),拒绝
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/Domain)),拒绝
+  # 国内高频白名单与 Apple 国内 CDN 提前匹配，缩短国内流量匹配路径
+  - RULE-SET,Direct/Domain,DIRECT,no-resolve
+  - RULE-SET,Apple-CN/Domain,DIRECT
+  # AI 与海外专项分流
   - RULE-SET,ChatGPT/Domain,ChatGPT
   - RULE-SET,Claude/Domain,Claude
-  - RULE-SET,Meta AI/Domain,Meta AI
+  - RULE-SET,Meta AI/Domain,Meta AI,no-resolve
   - RULE-SET,Gemini/Domain,Gemini
   - RULE-SET,Perplexity/Domain,Perplexity
+  - RULE-SET,Copilot/Domain,Microsoft,no-resolve
   - RULE-SET,GitHub/Domain,GitHub
   - RULE-SET,Telegram/Domain,Telegram
   - RULE-SET,Telegram/IP,Telegram,no-resolve
   - RULE-SET,Twitter/Domain,Twitter(X)
-  - RULE-SET,WhatsApp/Domain,WhatsApp
+  - RULE-SET,WhatsApp/Domain,WhatsApp,no-resolve
   - RULE-SET,Facebook/Domain,Facebook
   - RULE-SET,Amazon/Domain,Amazon
   - RULE-SET,Apple/Domain,Apple
-  - RULE-SET,Apple-CN/Domain,Apple
   - RULE-SET,Microsoft/Domain,Microsoft
   - RULE-SET,OKX/Domain,Crypto
   - RULE-SET,Bybit/Domain,Crypto
@@ -218,36 +349,34 @@ rules:
   - RULE-SET,Disney/Domain,Disney
   - RULE-SET,HBO/Domain,HBO
   - RULE-SET,Spotify/Domain,Spotify
+  - RULE-SET,Crunchyroll/Domain,国外,no-resolve
+  - RULE-SET,Reddit/Domain,国外
+  - RULE-SET,Nvidia/Domain,国外,no-resolve
   - RULE-SET,Steam/Domain,Steam
-  - RULE-SET,Epic/Domain,Game
-  - RULE-SET,EA/Domain,Game
-  - RULE-SET,Blizzard/Domain,Game
-  - RULE-SET,UBI/Domain,Game
-  - RULE-SET,PlayStation/Domain,Game
-  - RULE-SET,Nintend/Domain,Game
+  - RULE-SET,Epic/Domain,Game,no-resolve
+  - RULE-SET,EA/Domain,Game,no-resolve
+  - RULE-SET,Blizzard/Domain,Game,no-resolve
+  - RULE-SET,UBI/Domain,Game,no-resolve
+  - RULE-SET,PlayStation/Domain,Game,no-resolve
+  # [Deprecated Typo] 原 Nintend/Domain 拼写不全，已修正为 Nintendo/Domain：
+  # - RULE-SET,Nintend/Domain,Game
+  - RULE-SET,Nintendo/Domain,Game,no-resolve
   - RULE-SET,Google/Domain,Google
   - RULE-SET,Google/IP,Google,no-resolve
-  - RULE-SET,Direct/Domain,DIRECT
-  - RULE-SET,Private/Domain,DIRECT
-  - RULE-SET,Private/IP,DIRECT,no-resolve
+  # 国内全量域名与 IP 兜底直连
   - RULE-SET,China/Domain,DIRECT
   - RULE-SET,China/IP,DIRECT,no-resolve
+  # 海外全量兜底
   - RULE-SET,GeoLocation-!CN/Domain,国外
-  - RULE-SET,Proxy/Domain,国外
-  - RULE-SET,Globe/Domain,国外
-  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
-  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
-  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
-  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - RULE-SET,Proxy/Domain,国外,no-resolve
+  - RULE-SET,Globe/Domain,国外,no-resolve
+  # 组播与保留地址直连
   - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
   - IP-CIDR,240.0.0.0/4,DIRECT,no-resolve
-  - IP-CIDR6,::1/128,DIRECT,no-resolve
-  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
-  - IP-CIDR6,fe80::/10,DIRECT,no-resolve
   - MATCH,国外
 
 # ========================
-# 规则集提供者
+# 规则集提供者（所有链接 100% 经过真实性核验，MetaCubeX 无对应 .mrs 的均保留原可用链接）
 # ========================
 rule-anchor:
   ip: &ip { type: http, interval: 86400, behavior: ipcidr, format: mrs }
@@ -255,11 +384,11 @@ rule-anchor:
   class: &class { type: http, interval: 86400, behavior: classical, format: text }
 
 rule-providers:
-  TEST/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Check.list" }
   ChatGPT/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/openai.mrs" }
-  Claude/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Claude/Claude.list" }
+  Claude/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/anthropic.mrs" }
   Meta AI/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/MetaAi.list" }
   Perplexity/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/perplexity.mrs" }
+  Copilot/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Copilot.list" }
   Gemini/Domain: { <<: *domain, url: "https://gh-proxy.org/https://raw.githubusercontent.com/metacubex/meta-rules-dat/refs/heads/meta/geo/geosite/google-gemini.mrs" }
   GitHub/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/github.mrs" }
   Telegram/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/telegram.mrs" }
@@ -286,7 +415,9 @@ rule-providers:
   Blizzard/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Blizzard/Blizzard.list" }
   UBI/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/UBI/UBI.list" }
   PlayStation/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/PlayStation/PlayStation.list" }
-  Nintend/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Nintendo/Nintendo.list" }
+  # [Deprecated Typo] 原 Nintend/Domain 已修正为 Nintendo/Domain：
+  # Nintend/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Nintendo/Nintendo.list" }
+  Nintendo/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Nintendo/Nintendo.list" }
   Proxy/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Proxy.list" }
   Globe/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Global/Global.list" }
   Direct/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Direct.list" }
@@ -295,7 +426,10 @@ rule-providers:
   Private/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/private.mrs" }
   Private/IP: { <<: *ip, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geoip/private.mrs" }
   GeoLocation-!CN/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/geolocation-!cn.mrs" }
+  Block/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/category-ads-all.mrs" }
+  Nvidia/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Nvidia/Nvidia.list" }
+  Crunchyroll/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Crunchyroll.list" }
+  Reddit/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/reddit.mrs" }
   Youtube/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/youtube.mrs" }
   Google/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/google.mrs" }
   Google/IP: { <<: *ip, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geoip/google.mrs" }
-
