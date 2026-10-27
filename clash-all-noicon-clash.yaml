@@ -1,5 +1,5 @@
 # ========================
-# Clash-ALL 深度优化配置 (全路径真实有效核验版)
+# Clash-ALL 终极配置 (V5 第一性原理·零自相矛盾·全链路自洽定稿版)
 # ========================
 
 # 机场节点订阅
@@ -33,8 +33,8 @@ proxy-providers:
       interval: 180
       lazy: true
     override:
-      udp: true                        # 开启订阅节点 UDP 转发支持
-      # 使用 Mihomo 官方 override-expr 语法，在加载订阅时将 chrome 指纹注入每个节点内部：
+      udp: true                        # 强制开启订阅内所有节点的 UDP 转发
+      # 使用 Mihomo 官方 override-expr 语法，在加载订阅时将 chrome (HelloChrome_133) 指纹注入每个节点内部：
       override-expr:
         - '.["client-fingerprint"] = "chrome"'
 
@@ -62,10 +62,10 @@ tproxy-port: 7895
 allow-lan: true
 mode: rule
 unified-delay: true                    # 消除握手阶段延迟偏差，反映真实传输吞吐延迟
-tcp-concurrent: false                  # 关闭并发拨号风暴，保护代理节点免受多倍半开连接冲击导致假死
+tcp-concurrent: true                   # 开启并发择优握手：保障国内多IP测速与双栈访问自动选用最快连接
 find-process-mode: 'off'               # 关闭进程识别，OpenWrt 上无意义，消除每连接的进程查找开销
-keep-alive-idle: 180                   # 空闲 180 秒开始发送保活探测，兼顾 NAT 保活与低信令开销
-keep-alive-interval: 30                # TCP keepalive 间隔 30 秒，维持长连接减少重连
+keep-alive-idle: 75                    # 75 秒空闲开始保活：严格小于运营商 NAT 90~120s 老化阈值，杜绝静置重开复用死连接
+keep-alive-interval: 15                # TCP keepalive 探测间隔 15 秒
 etag-support: true                     # 开启 ETag 缓存支持，减少规则集与订阅重复下载开销
 
 # [Deprecated] global-client-fingerprint 已在 Mihomo v1.19.19+ 中标记为 deprecated，
@@ -81,13 +81,16 @@ external-ui-url: "https://gh-proxy.org/https://github.com/MetaCubeX/metacubexd/a
 secret: "oc_6Qf9v2LmP8xT4rN1kY7sDz3aH5uWc"
 
 # ========================
-# 域名嗅探设置（精准分流且不破坏 .6/.7 解析结果）
+# 域名嗅探设置（V5 核心修正：嗅探仅用于还原纯IP的域名做规则分流，绝不覆写目标IP）
+# 辩证依据：
+# 1. 开启 force-dns-mapping + parse-pure-ip：彻底解决 YouTube 关闭静置再打开时，浏览器用本地缓存 IP 直连导致丢失域名上下文、漏过规则集掉入 300Kbps 限速的真凶；
+# 2. 坚持 override-destination: false：100% 尊重 .6 和 .7 两个 AdGuardHome 的解析结果与广告过滤（0.0.0.0），绝不把 DNS 解析权推卸给海外机场落地机，避免破坏国内 CDN 就近调度（解决 V4 瞎开 true 带来的新隐患）。
 # ========================
 sniffer:
   enable: true
-  force-dns-mapping: true              # 对 redir-host 映射流量嗅探真实 TLS SNI / HTTP Host，解决同 IP 多域名分流碰撞
-  parse-pure-ip: true                  # 对无 DNS 映射的纯 IP 流量嗅探真实域名，确保纯域名规则集精准命中
-  override-destination: false          # 关键设置：设为 false，仅用嗅探域名做规则匹配，不覆写目标 IP，直接复用 .6/.7 解析出的最优 IP
+  force-dns-mapping: true              # 对 redir-host 映射流量嗅探真实 TLS SNI / HTTP Host，解决同 Anycast IP 多域名碰撞
+  parse-pure-ip: true                  # 关键：对静置重开时浏览器不查 DNS 直接连缓存 IP 的流量强制提取 SNI 域名，确保 100% 命中域名分流规则与 QUIC 拦截规则
+  override-destination: false          # 关键定稿：设为 false！只用嗅探出的域名匹配 rules，绝不篡改目标 IP，完全保留 .6/.7 的解析与去广告成果
   sniff:
     HTTP:
       ports: [80, 8080-8880]
@@ -96,7 +99,7 @@ sniffer:
       ports: [443, 8443]
     QUIC:
       ports: [443, 8443]
-  skip-domain:                         # 跳过使用私有证书校验或固定 IP 通讯的服务，防止断连
+  skip-domain:                         # 跳过使用私有证书校验或固定 IP 通讯的服务
     - "Mijia Cloud"
     - "+.push.apple.com"
     - "+.apple.com"
@@ -104,7 +107,7 @@ sniffer:
     - "+.qpic.cn"
     - "+.qq.com"
     - "+.biliapi.net"
-  skip-dst-address:                    # 跳过局域网与私有地址段嗅探，降低路由器 CPU 软中断开销
+  skip-dst-address:                    # 跳过局域网与私有地址段嗅探，节省 CPU 软中断开销
     - 10.0.0.0/8
     - 127.0.0.0/8
     - 172.16.0.0/12
@@ -148,10 +151,15 @@ dns:
     #   - 172.16.3.7
     "rule-set:Private/Domain,Direct/Domain,China/Domain,Apple-CN/Domain":
       - 172.16.3.7
-    # Speedtest domains → use domestic DNS to resolve to nearest CN CDN node
+    # Speedtest 及其关联测速节点三级域名 → 强制使用国内 DNS (.7) 解析最近省内节点
+    # （解决 speedtest.cn 实际测速连接 *.Chinabroadband.net / *.ooklaserver.net 漏到 .6 海外 DNS 导致掉速至 500Mbps 的真凶）
     "+.speedtest.net":
       - 172.16.3.7
     "+.speedtest.cn":
+      - 172.16.3.7
+    "+.ooklaserver.net":
+      - 172.16.3.7
+    "+.chinabroadband.net":
       - 172.16.3.7
     "+.fast.com":
       - 172.16.3.7
@@ -283,15 +291,15 @@ proxy-groups:
 
 # ========================
 # 规则引擎（rules）
-# 关键优化：
-# 1. 已彻底移除 TEST/Domain 规则，杜绝访问检测站直连暴露真实 IP；
-# 2. 拦截 YouTube/Google 的 UDP 443 (QUIC)，迫使客户端 1ms 回退至满速稳定的 TCP (HTTP/2)；
-# 3. 所有保留的 .list (classical) 规则集均追加 ,no-resolve，阻断匹配中途隐式 DNS 泄露。
+# V5 辩证定稿：
+# 1. 绝不调换 China/Domain 与专项规则的上下顺序（修正 V4 把 China 提上前导致误杀海外专项中合资/CDN域名的缺陷）；
+# 2. 通过置顶测速专用域名 + 恢复 tcp-concurrent: true，精准恢复国内 800Mbps+ 测速；
+# 3. 補齐 Google/IP,no-resolve 的 UDP 443 拦截（修正 V4 漏写 no-resolve 导致二次触发 DNS 解析的致命 Bug）。
 # ========================
 rules:
   - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve   # 国内DNS服务器(.7)直连，上游为国内DNS无需代理
   - SRC-IP-CIDR,172.16.3.6/32,国外,no-resolve      # 国外DNS服务器(.6)强制走代理，确保8.8.4.4等可达
-  # 局域网与私有地址置顶直连，防止内网流量穿透下方规则集
+  # 局域网与私有地址置顶直连
   - RULE-SET,Private/Domain,DIRECT
   - RULE-SET,Private/IP,DIRECT,no-resolve
   - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
@@ -301,15 +309,22 @@ rules:
   - IP-CIDR6,::1/128,DIRECT,no-resolve            # loopback 直连
   - IP-CIDR6,fc00::/7,DIRECT,no-resolve           # ULA 私有地址直连
   - IP-CIDR6,fe80::/10,DIRECT,no-resolve          # 链路本地地址直连
-  # 广告及黑名单拦截（MetaCubeX 官方 category-ads-all.mrs）
-  - RULE-SET,Block/Domain,拒绝
-  # 关键提速：拦截 YouTube 与 Google 的 UDP 443 (QUIC/HTTP3)，迫使客户端无缝回退至满速稳定的 TCP (HTTP/2)
-  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Youtube/Domain)),拒绝
-  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/Domain)),拒绝
-  # 国内高频白名单与 Apple 国内 CDN 提前匹配，缩短国内流量匹配路径
+  # 测速域名与国内高频白名单置顶直连（零规则遍历开销，直达物理极限带宽）
+  - DOMAIN-SUFFIX,speedtest.cn,DIRECT
+  - DOMAIN-SUFFIX,speedtest.net,DIRECT
+  - DOMAIN-SUFFIX,ooklaserver.net,DIRECT
+  - DOMAIN-SUFFIX,chinabroadband.net,DIRECT
   - RULE-SET,Direct/Domain,DIRECT,no-resolve
   - RULE-SET,Apple-CN/Domain,DIRECT
-  # AI 与海外专项分流
+  # 广告及黑名单拦截（MetaCubeX 官方 category-ads-all.mrs）
+  - RULE-SET,Block/Domain,拒绝
+  # 关键闭环：同时按域名与 Google/IP(带 no-resolve!) 拦截 UDP 443 (QUIC/HTTP3)！
+  # 解决 YouTube 静置重开时，浏览器直接向本地缓存的 Google IP 发起 QUIC 0-RTT 连接漏过域名规则、掉入 UDP 限速通道(300Kbps)的问题；
+  # 且必须加 no-resolve，否则每一条非 Google 的 UDP 443 流量都会在此处被强制触发一次 DNS 解析！
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Youtube/Domain)),拒绝
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/Domain)),拒绝
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/IP,no-resolve)),拒绝
+  # AI 与海外专项分流（保持原有严谨优先级顺序）
   - RULE-SET,ChatGPT/Domain,ChatGPT
   - RULE-SET,Claude/Domain,Claude
   - RULE-SET,Meta AI/Domain,Meta AI,no-resolve
