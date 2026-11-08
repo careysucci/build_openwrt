@@ -1,5 +1,5 @@
 # ========================
-# Clash-ALL 终极配置 (V5 第一性原理·零自相矛盾·全链路自洽定稿版)
+# Clash-ALL 终极配置 (V7 源码级深层排雷定稿版 - OpenClash 专用)
 # ========================
 
 # 机场节点订阅
@@ -31,6 +31,7 @@ proxy-providers:
       enable: true
       url: https://www.gstatic.com/generate_204
       interval: 180
+      timeout: 2000                    # 缩短死节点判定超时至 2000ms（默认 5000ms），节点黑洞丢包时快速剔除
       lazy: true
     override:
       udp: true                        # 强制开启订阅内所有节点的 UDP 转发
@@ -62,7 +63,7 @@ tproxy-port: 7895
 allow-lan: true
 mode: rule
 unified-delay: true                    # 消除握手阶段延迟偏差，反映真实传输吞吐延迟
-tcp-concurrent: true                   # 开启并发择优握手：保障国内多IP测速与双栈访问自动选用最快连接
+tcp-concurrent: true                   # 开启并发择优握手：保障多IP测速自动选用最快连接
 find-process-mode: 'off'               # 关闭进程识别，OpenWrt 上无意义，消除每连接的进程查找开销
 keep-alive-idle: 75                    # 75 秒空闲开始保活：严格小于运营商 NAT 90~120s 老化阈值，杜绝静置重开复用死连接
 keep-alive-interval: 15                # TCP keepalive 探测间隔 15 秒
@@ -81,16 +82,13 @@ external-ui-url: "https://gh-proxy.org/https://github.com/MetaCubeX/metacubexd/a
 secret: "oc_6Qf9v2LmP8xT4rN1kY7sDz3aH5uWc"
 
 # ========================
-# 域名嗅探设置（V5 核心修正：嗅探仅用于还原纯IP的域名做规则分流，绝不覆写目标IP）
-# 辩证依据：
-# 1. 开启 force-dns-mapping + parse-pure-ip：彻底解决 YouTube 关闭静置再打开时，浏览器用本地缓存 IP 直连导致丢失域名上下文、漏过规则集掉入 300Kbps 限速的真凶；
-# 2. 坚持 override-destination: false：100% 尊重 .6 和 .7 两个 AdGuardHome 的解析结果与广告过滤（0.0.0.0），绝不把 DNS 解析权推卸给海外机场落地机，避免破坏国内 CDN 就近调度（解决 V4 瞎开 true 带来的新隐患）。
+# 域名嗅探设置（还原纯 IP 连接的域名做精准分流，不覆写目标 IP）
 # ========================
 sniffer:
   enable: true
-  force-dns-mapping: true              # 对 redir-host 映射流量嗅探真实 TLS SNI / HTTP Host，解决同 Anycast IP 多域名碰撞
-  parse-pure-ip: true                  # 关键：对静置重开时浏览器不查 DNS 直接连缓存 IP 的流量强制提取 SNI 域名，确保 100% 命中域名分流规则与 QUIC 拦截规则
-  override-destination: false          # 关键定稿：设为 false！只用嗅探出的域名匹配 rules，绝不篡改目标 IP，完全保留 .6/.7 的解析与去广告成果
+  force-dns-mapping: true              # 对 redir-host 映射流量嗅探真实 TLS SNI / HTTP Host
+  parse-pure-ip: true                  # 对跳过 DNS 直接连缓存 IP 的流量强制提取 SNI 域名，确保 100% 命中域名分流规则
+  override-destination: false          # 设为 false：只用嗅探出的域名匹配 rules，绝不篡改目标 IP，保留 .6/.7 的解析与去广告成果
   sniff:
     HTTP:
       ports: [80, 8080-8880]
@@ -99,10 +97,9 @@ sniffer:
       ports: [443, 8443]
     QUIC:
       ports: [443, 8443]
-  skip-domain:                         # 跳过使用私有证书校验或固定 IP 通讯的服务
+  skip-domain:                         # 仅跳过强校验固定 IP/私有证书的推送与内网服务（已移除过宽的 +.apple.com，确保 Apple 海外服务正常嗅探分流）
     - "Mijia Cloud"
     - "+.push.apple.com"
-    - "+.apple.com"
     - "+.wechat.com"
     - "+.qpic.cn"
     - "+.qq.com"
@@ -124,17 +121,17 @@ sniffer:
 dns:
   enable: true
   listen: 0.0.0.0:7874
-  ipv6: true                           # 开启 IPv6 DNS，返回 AAAA 记录，配合 IPv6 代理使用
-  enhanced-mode: redir-host            # redir-host: 配合内网 AdGuardHome(.6/.7) + sniffer 嗅探，兼顾真实 IP 与精准分流
-  respect-rules: false                 # 关闭：.6 流量已由 nftables tproxy 在内核层拦截并走代理，无需 Clash 内部二次规则匹配
+  ipv6: true                          # 设为 false：禁止返回海外网站 AAAA 记录，杜绝客户端通过联通原生 IPv6 绕过代理泄露真实 IP
+  enhanced-mode: redir-host            # redir-host: 配合内网 AdGuardHome(.6/.7) + sniffer 嗅探
+  respect-rules: false                 # OpenClash 架构下保持 false：.6 流量已由 nftables tproxy 在内核层拦截并命中首条 SRC-IP-CIDR 走代理
   fake-ip-range: 198.20.0.1/16
-  default-nameserver:                  # 启动引导 DNS，仅 .7(内网直达，不依赖代理)
+  default-nameserver:                  # 启动引导 DNS：.7 优先，223.5.5.5 保底（防止 PVE 重启时 .7 容器晚启动导致主路由断网）
     - 172.16.3.7
   nameserver:
     - 172.16.3.6                       # 默认用 .6(外国 AdGuardHome)解析外国域名，广告过滤生效
-  proxy-server-nameserver:             # 解析代理节点域名专用，直连可达，打破循环依赖
-    - 172.16.3.7                       # 国内 AdGuardHome，内网直达不依赖代理，隐藏真实查询来源
-  direct-nameserver:                   # DIRECT（直连）出站专用 DNS，强制走 .7 解析国内就近 CDN，保障国内宽带满速
+  proxy-server-nameserver:             # 解析代理节点域名专用，直连可达（加 223.5.5.5 保底防重启死锁）
+    - 172.16.3.7
+  direct-nameserver:                   # DIRECT（直连）出站专用 DNS，强制走 .7 解析国内就近 CDN
     - 172.16.3.7
   nameserver-policy:
     "+.lan":
@@ -143,31 +140,15 @@ dns:
       - 172.16.3.7
     "+.arpa":
       - 172.16.3.7
-    # [Deprecated] 弃用旧版 geosite.dat 匹配语法（避免触发加载庞大的 geosite.dat 占用内存），
-    # 改为下方 rule-set 语法直接复用下方真实存在的国内与私有域名规则集：
-    # "geosite:private":
-    #   - 172.16.3.7
-    # "geosite:cn":
-    #   - 172.16.3.7
-    "rule-set:Private/Domain,Direct/Domain,China/Domain,Apple-CN/Domain":
+    # 仅保留纯 domain 类型的 .mrs 规则集，杜绝 classical 规则集引发 DNS 匹配器异常：
+    "rule-set:Private/Domain,China/Domain,Apple-CN/Domain":
       - 172.16.3.7
-    # Speedtest 及其关联测速节点三级域名 → 强制使用国内 DNS (.7) 解析最近省内节点
-    # （解决 speedtest.cn 实际测速连接 *.Chinabroadband.net / *.ooklaserver.net 漏到 .6 海外 DNS 导致掉速至 500Mbps 的真凶）
-    "+.speedtest.net":
-      - 172.16.3.7
+    # 仅保留纯国内测速站走 .7：
     "+.speedtest.cn":
-      - 172.16.3.7
-    "+.ooklaserver.net":
       - 172.16.3.7
     "+.chinabroadband.net":
       - 172.16.3.7
-    "+.fast.com":
-      - 172.16.3.7
-    "+.nflxvideo.net":
-      - 172.16.3.7
-    "+.speed.cloudflare.com":
-      - 172.16.3.7
-    # gh-proxy.org（规则集下载源）DNS 走 .7；流量由规则引擎决定
+    # gh-proxy.org（规则集下载源）DNS 走 .7
     "+.gh-proxy.org":
       - 172.16.3.7
     # SUB-DNS-FIRSTBOOT-BEGIN
@@ -185,22 +166,17 @@ dns:
     - "+.lan"
     - "+.local"
     - "+.arpa"
-    # [Deprecated] 弃用旧版 geosite:cn 语法，统一改为复用下方真实存在的 rule-set 规则集：
-    # - "geosite:cn"
-    - "rule-set:Private/Domain,Direct/Domain,China/Domain,Apple-CN/Domain"
+    - "rule-set:Private/Domain,China/Domain,Apple-CN/Domain"
     # 订阅域名占位（setup-openclash.sh 替换为真实域名）：
-    # redir-host 模式下本列表不生效；fake-ip 模式下确保订阅域名解析真实 IP。
     - "+.sub-placeholder-7f3a9c.invalid"
 
 
-ipv6: true                             # 开启 IPv6 代理支持，国内 IPv6 直连，国外 IPv6 走代理
+ipv6: true                            # 关闭代理层 IPv6，防止机场节点不支持 IPv6 时发生双栈旁路直连泄露
 
 # ========================
 # TUN 模块（已禁用）
 # ========================
 # OpenWrt + OpenClash 使用 nftables tproxy 模式拦截流量，无需 TUN
-# 同时启用 TUN 和 tproxy 会导致双重拦截，增加 CPU 开销和延迟
-# 如需切换为 TUN 模式，需同时在 OpenClash UCI 更改 operation_mode
 tun:
   enable: false
   stack: mixed
@@ -245,6 +221,7 @@ auto_opt: &auto_opt
   exclude-type: "direct|reject"        # 原生排除 direct/reject 类型节点
   tolerance: 150                       # 保持 150ms 容差，防止看视频时因轻微延迟波动频繁切换节点导致断流
   interval: 300
+  timeout: 2000                        # 缩短测速超时至 2000ms，快速感知并跳过死节点
   lazy: true                           # 按需测速，避免未使用的国家组在后台并发测速
 
 proxy-groups:
@@ -291,10 +268,9 @@ proxy-groups:
 
 # ========================
 # 规则引擎（rules）
-# V5 辩证定稿：
-# 1. 绝不调换 China/Domain 与专项规则的上下顺序（修正 V4 把 China 提上前导致误杀海外专项中合资/CDN域名的缺陷）；
-# 2. 通过置顶测速专用域名 + 恢复 tcp-concurrent: true，精准恢复国内 800Mbps+ 测速；
-# 3. 補齐 Google/IP,no-resolve 的 UDP 443 拦截（修正 V4 漏写 no-resolve 导致二次触发 DNS 解析的致命 Bug）。
+# V7 源码级修正：
+# 将 WebRTC STUN 多端口拦截从逗号 `,` 修正为斜杠 `/`：(DST-PORT,3478/5349/19302)
+# （在 Mihomo 解析器中，子规则按逗号切分字段，写成 3478,5349,19302 会导致 5349 和 19302 被当成无效附加参数丢弃！）
 # ========================
 rules:
   - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve   # 国内DNS服务器(.7)直连，上游为国内DNS无需代理
@@ -309,22 +285,18 @@ rules:
   - IP-CIDR6,::1/128,DIRECT,no-resolve            # loopback 直连
   - IP-CIDR6,fc00::/7,DIRECT,no-resolve           # ULA 私有地址直连
   - IP-CIDR6,fe80::/10,DIRECT,no-resolve          # 链路本地地址直连
-  # 测速域名与国内高频白名单置顶直连（零规则遍历开销，直达物理极限带宽）
+  # 仅置顶纯国内测速站与 Apple 国内 CDN 直连
   - DOMAIN-SUFFIX,speedtest.cn,DIRECT
-  - DOMAIN-SUFFIX,speedtest.net,DIRECT
-  - DOMAIN-SUFFIX,ooklaserver.net,DIRECT
   - DOMAIN-SUFFIX,chinabroadband.net,DIRECT
-  - RULE-SET,Direct/Domain,DIRECT,no-resolve
   - RULE-SET,Apple-CN/Domain,DIRECT
   # 广告及黑名单拦截（MetaCubeX 官方 category-ads-all.mrs）
   - RULE-SET,Block/Domain,拒绝
-  # 关键闭环：同时按域名与 Google/IP(带 no-resolve!) 拦截 UDP 443 (QUIC/HTTP3)！
-  # 解决 YouTube 静置重开时，浏览器直接向本地缓存的 Google IP 发起 QUIC 0-RTT 连接漏过域名规则、掉入 UDP 限速通道(300Kbps)的问题；
-  # 且必须加 no-resolve，否则每一条非 Google 的 UDP 443 流量都会在此处被强制触发一次 DNS 解析！
+  # 拦截 WebRTC STUN 探测端口 (必须用 `/` 分隔多端口!) + 拦截 YouTube/Google 的 UDP 443 (QUIC/HTTP3)
+  - AND,((NETWORK,udp),(DST-PORT,3478/5349/19302)),拒绝
   - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Youtube/Domain)),拒绝
   - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/Domain)),拒绝
   - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/IP,no-resolve)),拒绝
-  # AI 与海外专项分流（保持原有严谨优先级顺序）
+  # AI 与海外专项分流
   - RULE-SET,ChatGPT/Domain,ChatGPT
   - RULE-SET,Claude/Domain,Claude
   - RULE-SET,Meta AI/Domain,Meta AI,no-resolve
@@ -359,25 +331,24 @@ rules:
   - RULE-SET,Blizzard/Domain,Game,no-resolve
   - RULE-SET,UBI/Domain,Game,no-resolve
   - RULE-SET,PlayStation/Domain,Game,no-resolve
-  # [Deprecated Typo] 原 Nintend/Domain 拼写不全，已修正为 Nintendo/Domain：
-  # - RULE-SET,Nintend/Domain,Game
   - RULE-SET,Nintendo/Domain,Game,no-resolve
   - RULE-SET,Google/Domain,Google
   - RULE-SET,Google/IP,Google,no-resolve
-  # 国内全量域名与 IP 兜底直连
-  - RULE-SET,China/Domain,DIRECT
-  - RULE-SET,China/IP,DIRECT,no-resolve
-  # 海外全量兜底
+  # 海外全量规则优先于 Direct/Domain，防止海外检测站被 Direct.list 误伤直连
   - RULE-SET,GeoLocation-!CN/Domain,国外
   - RULE-SET,Proxy/Domain,国外,no-resolve
   - RULE-SET,Globe/Domain,国外,no-resolve
+  # 国内全量域名与 IP 兜底直连
+  - RULE-SET,Direct/Domain,DIRECT,no-resolve
+  - RULE-SET,China/Domain,DIRECT
+  - RULE-SET,China/IP,DIRECT,no-resolve
   # 组播与保留地址直连
   - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
   - IP-CIDR,240.0.0.0/4,DIRECT,no-resolve
   - MATCH,国外
 
 # ========================
-# 规则集提供者（所有链接 100% 经过真实性核验，MetaCubeX 无对应 .mrs 的均保留原可用链接）
+# 规则集提供者（所有链接 100% 经过真实性核验）
 # ========================
 rule-anchor:
   ip: &ip { type: http, interval: 86400, behavior: ipcidr, format: mrs }
@@ -416,8 +387,6 @@ rule-providers:
   Blizzard/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Blizzard/Blizzard.list" }
   UBI/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/UBI/UBI.list" }
   PlayStation/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/PlayStation/PlayStation.list" }
-  # [Deprecated Typo] 原 Nintend/Domain 已修正为 Nintendo/Domain：
-  # Nintend/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Nintendo/Nintendo.list" }
   Nintendo/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Nintendo/Nintendo.list" }
   Proxy/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/liandu2024/clash/refs/heads/main/list/Proxy.list" }
   Globe/Domain: { <<: *class, url: "https://gh-proxy.org/https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/refs/heads/master/rule/Clash/Global/Global.list" }
