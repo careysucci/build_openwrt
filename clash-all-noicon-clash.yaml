@@ -1,9 +1,14 @@
 # ========================
-# Clash-ALL 终极配置 (V7 源码级深层排雷定稿版 - OpenClash 专用)
+# Clash-ALL 终极定稿配置 (V12 原生 DIRECT/REJECT 统一适配 + 国内原生双栈 IPv6 版 - OpenClash 专用)
+# ========================
+# 第一性原理核心修正：
+# 1. 统一采用原生内置 DIRECT 与 REJECT 关键字，移除冗余自定义 proxies 包装；
+# 2. 开启全局 ipv6: true 与 dns.ipv6: true：国内域名通过 .7 (172.16.3.7) 完整解析 A + AAAA 双栈记录并经由 China/Domain、China/IP 原生 IPv6 直连；
+# 3. 海外 DNS .6 ("172.16.3.6#disable-ipv6=true") 保持在 DNS 源头剥离海外 AAAA 记录，并禁止 .6 走不稳定的 UDP 443 (QUIC)，
+#    确保 Google/YouTube 100% 走高速 IPv4 代理隧道，彻底根除“节点绿色健康但 Google 打不开”与海外 IPv6 旁路泄露；
+# 4. 保持 sniffer.force-dns-mapping: false 与无 direct-nameserver 设计，国内直连 0ms 零阻塞秒开。
 # ========================
 
-# 机场节点订阅
-# 刷机后 SSH 运行 /root/setup-openclash.sh 完成首次配置。
 proxy-providers:
   cc-auto:
     type: http
@@ -13,16 +18,8 @@ proxy-providers:
     # 首次配置（SSH 到路由器运行）：
     #   ./setup-openclash.sh 'https://你的订阅链接'
     #   脚本会：① 下载节点写入缓存 ② 把真实 URL 写入本字段 ③ 启动 OpenClash
-    #
-    # URL 写入后，mihomo 每 interval 秒自动拉取最新节点（无需 OpenClash 订阅管理）。
-    #
-    # 排障：机场迁移订阅域名时旧地址会 301，mihomo 不跟随跳转 → provider 拉取报 EOF。
-    #   诊断：curl -sIL '旧URL' 看 Location；修复：把 url 换成 Location 指向的最终地址。
     url: "http://127.0.0.1:11111/subscription"
     # SUB-PROXY-FIRSTBOOT-BEGIN
-    # 订阅下载强制直连（DIRECT），绕过规则引擎（固化，不再删除）。
-    # 机场订阅端点国内可直达（curl 直连 200），直连拉取永不依赖节点存活；
-    # 若某机场端点必须经代理才能访问，手动删除下一行恢复走规则引擎。
     proxy: DIRECT
     # SUB-PROXY-FIRSTBOOT-END
     path: "/etc/openclash/config/providers/cc-auto.yaml"
@@ -30,18 +27,13 @@ proxy-providers:
     health-check:
       enable: true
       url: https://www.gstatic.com/generate_204
-      interval: 180
-      timeout: 2000                    # 缩短死节点判定超时至 2000ms（默认 5000ms），节点黑洞丢包时快速剔除
-      lazy: true
+      interval: 150
+      timeout: 5000
+      lazy: false
     override:
-      udp: true                        # 强制开启订阅内所有节点的 UDP 转发
-      # 使用 Mihomo 官方 override-expr 语法，在加载订阅时将 chrome (HelloChrome_133) 指纹注入每个节点内部：
+      udp: true
       override-expr:
         - '.["client-fingerprint"] = "chrome"'
-
-proxies:
-  - { name: 直连, type: direct, udp: true, client-fingerprint: chrome }
-  - { name: 拒绝, type: reject, client-fingerprint: chrome }
 
 # ========================
 # 主要端口设置
@@ -52,27 +44,15 @@ redir-port: 7892
 mixed-port: 7893
 tproxy-port: 7895
 
-# [Deprecated] 传统 v2ray dat 模式已弃用，现采用下方 rule-providers 规则集：
-#geodata-mode: true
-#geodata-loader: standard
-#geox-url:
-#  geoip: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
-#  geosite: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
-#  mmdb: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
-
 allow-lan: true
 mode: rule
-unified-delay: true                    # 消除握手阶段延迟偏差，反映真实传输吞吐延迟
-tcp-concurrent: true                   # 开启并发择优握手：保障多IP测速自动选用最快连接
-find-process-mode: 'off'               # 关闭进程识别，OpenWrt 上无意义，消除每连接的进程查找开销
-keep-alive-idle: 75                    # 75 秒空闲开始保活：严格小于运营商 NAT 90~120s 老化阈值，杜绝静置重开复用死连接
-keep-alive-interval: 15                # TCP keepalive 探测间隔 15 秒
-etag-support: true                     # 开启 ETag 缓存支持，减少规则集与订阅重复下载开销
-
-# [Deprecated] global-client-fingerprint 已在 Mihomo v1.19.19+ 中标记为 deprecated，
-#   已通过上方 `proxy-providers.cc-auto.override.override-expr` 及 `proxies` 注入 `client-fingerprint: chrome`：
-# global-client-fingerprint: chrome
-
+ipv6: true                             # 开启 IPv6 双栈支持：国内流量原生 IPv6 直连
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: 'off'
+keep-alive-idle: 15                    # 15 秒空闲即发送保活探测，快速清理 .6 与浏览器的半开僵尸连接
+keep-alive-interval: 15
+etag-support: true
 log-level: warning
 
 external-controller: 127.0.0.1:9090
@@ -82,13 +62,13 @@ external-ui-url: "https://gh-proxy.org/https://github.com/MetaCubeX/metacubexd/a
 secret: "oc_6Qf9v2LmP8xT4rN1kY7sDz3aH5uWc"
 
 # ========================
-# 域名嗅探设置（还原纯 IP 连接的域名做精准分流，不覆写目标 IP）
+# 域名嗅探设置（已知映射零阻塞，仅嗅探纯 IP 连接）
 # ========================
 sniffer:
   enable: true
-  force-dns-mapping: true              # 对 redir-host 映射流量嗅探真实 TLS SNI / HTTP Host
-  parse-pure-ip: true                  # 对跳过 DNS 直接连缓存 IP 的流量强制提取 SNI 域名，确保 100% 命中域名分流规则
-  override-destination: false          # 设为 false：只用嗅探出的域名匹配 rules，绝不篡改目标 IP，保留 .6/.7 的解析与去广告成果
+  force-dns-mapping: false             # 设为 false：redir-host 已映射的域名直接 0ms 放行，不再阻塞等待首包
+  parse-pure-ip: true                  # 仅对跳过 DNS 的纯 IP 连接提取 TLS SNI / HTTP Host
+  override-destination: false          # 设为 false：绝不篡改目标 IP，100% 尊重 .7/.6 的解析与去广告成果
   sniff:
     HTTP:
       ports: [80, 8080-8880]
@@ -97,14 +77,14 @@ sniffer:
       ports: [443, 8443]
     QUIC:
       ports: [443, 8443]
-  skip-domain:                         # 仅跳过强校验固定 IP/私有证书的推送与内网服务（已移除过宽的 +.apple.com，确保 Apple 海外服务正常嗅探分流）
+  skip-domain:
     - "Mijia Cloud"
     - "+.push.apple.com"
     - "+.wechat.com"
     - "+.qpic.cn"
     - "+.qq.com"
     - "+.biliapi.net"
-  skip-dst-address:                    # 跳过局域网与私有地址段嗅探，节省 CPU 软中断开销
+  skip-dst-address:
     - 10.0.0.0/8
     - 127.0.0.0/8
     - 172.16.0.0/12
@@ -116,22 +96,22 @@ sniffer:
     - "fe80::/10"
 
 # ========================
-# DNS 设置
+# DNS 设置（100% 纯粹复用 172.16.3.7 与 172.16.3.6，国内完整双栈 IPv6 + 海外纯 IPv4）
 # ========================
 dns:
   enable: true
   listen: 0.0.0.0:7874
-  ipv6: true                          # 设为 false：禁止返回海外网站 AAAA 记录，杜绝客户端通过联通原生 IPv6 绕过代理泄露真实 IP
-  enhanced-mode: redir-host            # redir-host: 配合内网 AdGuardHome(.6/.7) + sniffer 嗅探
-  respect-rules: false                 # OpenClash 架构下保持 false：.6 流量已由 nftables tproxy 在内核层拦截并命中首条 SRC-IP-CIDR 走代理
+  ipv6: true                           # 开启 IPv6 DNS 解析：让国内域名通过 .7 正常返回 A + AAAA 双栈记录
+  enhanced-mode: redir-host
+  respect-rules: false
   fake-ip-range: 198.20.0.1/16
-  default-nameserver:                  # 启动引导 DNS：.7 优先，223.5.5.5 保底（防止 PVE 重启时 .7 容器晚启动导致主路由断网）
+  default-nameserver:
     - 172.16.3.7
   nameserver:
-    - 172.16.3.6                       # 默认用 .6(外国 AdGuardHome)解析外国域名，广告过滤生效
-  proxy-server-nameserver:             # 解析代理节点域名专用，直连可达（加 223.5.5.5 保底防重启死锁）
-    - 172.16.3.7
-  direct-nameserver:                   # DIRECT（直连）出站专用 DNS，强制走 .7 解析国内就近 CDN
+    # 海外域名由 .6 解析，附加 #disable-ipv6=true 在 0ms 内剥离海外 AAAA 记录，
+    # 确保 Google/YouTube 100% 走 IPv4 代理隧道，彻底避免客户端拿到 Google IPv6 后因节点不支持或内核绕过导致打不开/泄露！
+    - "172.16.3.6#disable-ipv6=true"
+  proxy-server-nameserver:
     - 172.16.3.7
   nameserver-policy:
     "+.lan":
@@ -140,23 +120,15 @@ dns:
       - 172.16.3.7
     "+.arpa":
       - 172.16.3.7
-    # 仅保留纯 domain 类型的 .mrs 规则集，杜绝 classical 规则集引发 DNS 匹配器异常：
     "rule-set:Private/Domain,China/Domain,Apple-CN/Domain":
       - 172.16.3.7
-    # 仅保留纯国内测速站走 .7：
     "+.speedtest.cn":
       - 172.16.3.7
     "+.chinabroadband.net":
       - 172.16.3.7
-    # gh-proxy.org（规则集下载源）DNS 走 .7
     "+.gh-proxy.org":
       - 172.16.3.7
     # SUB-DNS-FIRSTBOOT-BEGIN
-    # 订阅域名走 .7 解析（固化，不再删除）：
-    #   · .6 上游 DoH 经代理 → 节点全灭时订阅域名解析死锁，订阅无法自愈；
-    #   · .7 内网直达不依赖代理 → 订阅永远可解析可下载（配合上方 proxy: DIRECT）。
-    # setup-openclash.sh 会把占位域名替换为真实订阅域名（nameserver-policy 与
-    # fake-ip-filter 两处同占位符，一次 sed 全局替换）。
     "+.sub-placeholder-7f3a9c.invalid":
       - 172.16.3.7
     # SUB-DNS-FIRSTBOOT-END
@@ -167,16 +139,11 @@ dns:
     - "+.local"
     - "+.arpa"
     - "rule-set:Private/Domain,China/Domain,Apple-CN/Domain"
-    # 订阅域名占位（setup-openclash.sh 替换为真实域名）：
     - "+.sub-placeholder-7f3a9c.invalid"
-
-
-ipv6: true                            # 关闭代理层 IPv6，防止机场节点不支持 IPv6 时发生双栈旁路直连泄露
 
 # ========================
 # TUN 模块（已禁用）
 # ========================
-# OpenWrt + OpenClash 使用 nftables tproxy 模式拦截流量，无需 TUN
 tun:
   enable: false
   stack: mixed
@@ -203,26 +170,27 @@ profile:
   store-fake-ip: true
 
 # ========================
-# 策略组定义（已彻底移除 Test 节点）
+# 策略组定义（100% 原生 DIRECT / REJECT 统一适配）
 # ========================
 default: &default
   type: select
-  proxies: [ 直连,所有-手动,所有-自动,香港-自动,台湾-自动,日本-自动,新加坡-自动,韩国-自动,美国-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,拒绝 ]
+  proxies: [ DIRECT,所有-手动,所有-自动,香港-自动,台湾-自动,日本-自动,新加坡-自动,韩国-自动,美国-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,REJECT ]
 second: &second
   type: select
-  proxies: [ 日本-自动,香港-自动,台湾-自动,新加坡-自动,韩国-自动,美国-自动,所有-手动,所有-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,直连,拒绝 ]
+  proxies: [ 日本-自动,香港-自动,台湾-自动,新加坡-自动,韩国-自动,美国-自动,所有-手动,所有-自动,英国-自动,越南-自动,印度-自动,德国-自动,法国-自动,其他-自动,DIRECT,REJECT ]
 third: &third
   type: select
-  proxies: [ 美国-自动,日本-自动,台湾-自动,新加坡-自动,韩国-自动,英国-自动,德国-自动,法国-自动,香港-自动,所有-手动,所有-自动,越南-自动,印度-自动,其他-自动,直连,拒绝 ]
+  proxies: [ 美国-自动,日本-自动,台湾-自动,新加坡-自动,韩国-自动,英国-自动,德国-自动,法国-自动,香港-自动,所有-手动,所有-自动,越南-自动,印度-自动,其他-自动,DIRECT,REJECT ]
+
 auto_opt: &auto_opt
   type: url-test
   url: https://www.gstatic.com/generate_204
   include-all: true
-  exclude-type: "direct|reject"        # 原生排除 direct/reject 类型节点
-  tolerance: 150                       # 保持 150ms 容差，防止看视频时因轻微延迟波动频繁切换节点导致断流
-  interval: 300
-  timeout: 2000                        # 缩短测速超时至 2000ms，快速感知并跳过死节点
-  lazy: true                           # 按需测速，避免未使用的国家组在后台并发测速
+  tolerance: 50                        # 50ms 灵敏容差：当某节点延迟劣化超过 50ms 时及时切换至更优节点
+  interval: 180
+  timeout: 5000
+  max-failed-times: 2
+  lazy: true
 
 proxy-groups:
   - { name: ChatGPT, <<: *third }
@@ -251,11 +219,11 @@ proxy-groups:
   - { name: 国外, <<: *second }
   - { name: 国内, <<: *default }
   - { name: 其他, <<: *second }
-  - { name: 所有-手动, type: select, include-all: true, exclude-type: "direct|reject", filter: "^((?!(直连|拒绝)).)*$" }
-  - { name: 所有-自动, <<: *auto_opt, filter: "^((?!(直连|拒绝)).)*$" }
+  - { name: 所有-手动, type: select, include-all: true }
+  - { name: 所有-自动, <<: *auto_opt }
   - { name: 香港-自动, <<: *auto_opt, filter: "(?=.*(广港|香港|HK|Hong Kong|🇭🇰|HongKong)).*$" }
   - { name: 台湾-自动, <<: *auto_opt, filter: "(?=.*(广台|台湾|台灣|TW|Tai Wan|🇹🇼|🇨🇳|TaiWan|Taiwan)).*$" }
-  - { name: 日本-自动, <<: *auto_opt, filter: "(?=.*(广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan)).*$" }
+  - { name: 日本-自动, <<: *auto_opt, lazy: false, filter: "(?=.*(广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan)).*$" }
   - { name: 新加坡-自动, <<: *auto_opt, filter: "(?=.*(广新|新加坡|SG|坡|狮城|🇸🇬|Singapore)).*$" }
   - { name: 韩国-自动, <<: *auto_opt, filter: "(?=.*(广韩|韩国|韓國|KR|首尔|春川|🇰🇷|Korea)).*$" }
   - { name: 美国-自动, <<: *auto_opt, filter: "(?=.*(广美|US|美国|纽约|波特兰|达拉斯|俄勒|凤凰城|费利蒙|洛杉|圣何塞|圣克拉|西雅|芝加|🇺🇸|United States)).*$" }
@@ -264,17 +232,16 @@ proxy-groups:
   - { name: 印度-自动, <<: *auto_opt, filter: "(?=.*(印度|India|🇮🇳|孟买)).*$" }
   - { name: 德国-自动, <<: *auto_opt, filter: "(?=.*(德国|德國|DE|Germany|🇩🇪|法兰克福)).*$" }
   - { name: 法国-自动, <<: *auto_opt, filter: "(?=.*(法国|法國|FR|France|🇫🇷|巴黎)).*$" }
-  - { name: 其他-自动, <<: *auto_opt, filter: "^((?!(直连|拒绝|广港|香港|HK|Hong Kong|🇭🇰|HongKong|广台|台湾|台灣|TW|Tai Wan|🇹🇼|🇨🇳|TaiWan|Taiwan|广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan|广新|新加坡|SG|坡|狮城|🇸🇬|Singapore|广韩|韩国|韓國|KR|首尔|春川|🇰🇷|Korea|广美|US|美国|纽约|波特兰|达拉斯|俄勒|凤凰城|费利蒙|洛杉|圣何塞|圣克拉|西雅|芝加|🇺🇸|United States|英国|UK|United Kingdom|🇬🇧|伦敦|越南|VN|Vietnam|🇻🇳|印度|India|🇮🇳|孟买|德国|德國|DE|Germany|🇩🇪|法兰克福|法国|法國|FR|France|🇫🇷|巴黎)).)*$" }
+  - { name: 其他-自动, <<: *auto_opt, filter: "^((?!(广港|香港|HK|Hong Kong|🇭🇰|HongKong|广台|台湾|台灣|TW|Tai Wan|🇹🇼|🇨🇳|TaiWan|Taiwan|广日|日本|JP|川日|东京|大阪|泉日|埼玉|沪日|深日|🇯🇵|Japan|广新|新加坡|SG|坡|狮城|🇸🇬|Singapore|广韩|韩国|韓國|KR|首尔|春川|🇰🇷|Korea|广美|US|美国|纽约|波特兰|达拉斯|俄勒|凤凰城|费利蒙|洛杉|圣何塞|圣克拉|西雅|芝加|🇺🇸|United States|英国|UK|United Kingdom|🇬🇧|伦敦|越南|VN|Vietnam|🇻🇳|印度|India|🇮🇳|孟买|德国|德國|DE|Germany|🇩🇪|法兰克福|法国|法國|FR|France|🇫🇷|巴黎)).)*$" }
 
 # ========================
 # 规则引擎（rules）
-# V7 源码级修正：
-# 将 WebRTC STUN 多端口拦截从逗号 `,` 修正为斜杠 `/`：(DST-PORT,3478/5349/19302)
-# （在 Mihomo 解析器中，子规则按逗号切分字段，写成 3478,5349,19302 会导致 5349 和 19302 被当成无效附加参数丢弃！）
 # ========================
 rules:
-  - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve   # 国内DNS服务器(.7)直连，上游为国内DNS无需代理
-  - SRC-IP-CIDR,172.16.3.6/32,国外,no-resolve      # 国外DNS服务器(.6)强制走代理，确保8.8.4.4等可达
+  - SRC-IP-CIDR,172.16.3.7/32,DIRECT,no-resolve   # 国内DNS服务器(.7)直连
+  # 禁止国外DNS服务器(.6)向上游发起不稳定的 UDP 443 (HTTP/3 DoH)，强制其使用可靠 TCP DoH/DoT 经代理出站，防止 .6 因 UDP 会话假死导致 Google 解析超时：
+  - AND,((SRC-IP-CIDR,172.16.3.6/32),(NETWORK,udp),(DST-PORT,443)),REJECT
+  - SRC-IP-CIDR,172.16.3.6/32,国外,no-resolve      # 国外DNS服务器(.6)强制走代理
   # 局域网与私有地址置顶直连
   - RULE-SET,Private/Domain,DIRECT
   - RULE-SET,Private/IP,DIRECT,no-resolve
@@ -282,20 +249,22 @@ rules:
   - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
-  - IP-CIDR6,::1/128,DIRECT,no-resolve            # loopback 直连
-  - IP-CIDR6,fc00::/7,DIRECT,no-resolve           # ULA 私有地址直连
-  - IP-CIDR6,fe80::/10,DIRECT,no-resolve          # 链路本地地址直连
-  # 仅置顶纯国内测速站与 Apple 国内 CDN 直连
+  - IP-CIDR6,::1/128,DIRECT,no-resolve
+  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
+  - IP-CIDR6,fe80::/10,DIRECT,no-resolve
+  # 纯国内测速站与 Apple 国内 CDN 置顶直连
   - DOMAIN-SUFFIX,speedtest.cn,DIRECT
   - DOMAIN-SUFFIX,chinabroadband.net,DIRECT
   - RULE-SET,Apple-CN/Domain,DIRECT
-  # 广告及黑名单拦截（MetaCubeX 官方 category-ads-all.mrs）
-  - RULE-SET,Block/Domain,拒绝
-  # 拦截 WebRTC STUN 探测端口 (必须用 `/` 分隔多端口!) + 拦截 YouTube/Google 的 UDP 443 (QUIC/HTTP3)
-  - AND,((NETWORK,udp),(DST-PORT,3478/5349/19302)),拒绝
-  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Youtube/Domain)),拒绝
-  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/Domain)),拒绝
-  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/IP,no-resolve)),拒绝
+  # 广告及黑名单拦截
+  - RULE-SET,Block/Domain,REJECT
+  # 精准拦截 WebRTC STUN 探测与 YouTube/Google 的 UDP 443 (QUIC/HTTP3)
+  - DOMAIN-KEYWORD,stun,REJECT
+  - AND,((NETWORK,udp),(DST-PORT,3478-3479/5349-5350/19302-19309)),REJECT
+  - AND,((NETWORK,tcp),(DST-PORT,3478-3479/5349-5350/19302-19309)),REJECT
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Youtube/Domain)),REJECT
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/Domain)),REJECT
+  - AND,((NETWORK,udp),(DST-PORT,443),(RULE-SET,Google/IP,no-resolve)),REJECT
   # AI 与海外专项分流
   - RULE-SET,ChatGPT/Domain,ChatGPT
   - RULE-SET,Claude/Domain,Claude
@@ -334,21 +303,21 @@ rules:
   - RULE-SET,Nintendo/Domain,Game,no-resolve
   - RULE-SET,Google/Domain,Google
   - RULE-SET,Google/IP,Google,no-resolve
-  # 海外全量规则优先于 Direct/Domain，防止海外检测站被 Direct.list 误伤直连
-  - RULE-SET,GeoLocation-!CN/Domain,国外
-  - RULE-SET,Proxy/Domain,国外,no-resolve
-  - RULE-SET,Globe/Domain,国外,no-resolve
-  # 国内全量域名与 IP 兜底直连
+  # 国内全量域名与 IP（含国内全部原生 IPv6 网段）优先直连
   - RULE-SET,Direct/Domain,DIRECT,no-resolve
   - RULE-SET,China/Domain,DIRECT
   - RULE-SET,China/IP,DIRECT,no-resolve
+  # 海外全量兜底
+  - RULE-SET,GeoLocation-!CN/Domain,国外
+  - RULE-SET,Proxy/Domain,国外,no-resolve
+  - RULE-SET,Globe/Domain,国外,no-resolve
   # 组播与保留地址直连
   - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
   - IP-CIDR,240.0.0.0/4,DIRECT,no-resolve
   - MATCH,国外
 
 # ========================
-# 规则集提供者（所有链接 100% 经过真实性核验）
+# 规则集提供者
 # ========================
 rule-anchor:
   ip: &ip { type: http, interval: 86400, behavior: ipcidr, format: mrs }
@@ -403,4 +372,3 @@ rule-providers:
   Youtube/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/youtube.mrs" }
   Google/Domain: { <<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/google.mrs" }
   Google/IP: { <<: *ip, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geoip/google.mrs" }
-# GateFireWall/Domain: {<<: *domain, url: "https://gh-proxy.org/https://github.com/metacubex/meta-rules-dat/raw/refs/heads/meta/geo/geosite/gfw.mrs"}
