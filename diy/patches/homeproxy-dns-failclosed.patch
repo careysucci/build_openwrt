@@ -1,0 +1,19 @@
+--- a/root/etc/homeproxy/scripts/generate_client.uc
++++ b/root/etc/homeproxy/scripts/generate_client.uc
+@@ -579,14 +579,6 @@ const config = {};
+ 		});
+-		/* A valid DNS message may still report a temporary upstream failure. */
+-		push(config.dns.rules, {
+-			type: 'logical',
+-			mode: 'or',
+-			rules: map(['SERVFAIL', 'REFUSED'], (rcode) => ({
+-				match_response: true, response_rcode: rcode
+-			})),
+-			action: 'route',
+-			server: 'china-dns'
+-		});
++		/* Wy.House: fail closed on main DNS errors. Never retry a foreign query
++		   through the direct mainland resolver after SERVFAIL or REFUSED. */
+ 		push(config.dns.rules, {
+ 			rule_set: 'geoip-cn',
+ 			match_response: true,

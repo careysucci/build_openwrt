@@ -1,0 +1,21 @@
+--- a/root/etc/homeproxy/scripts/generate_client.uc
++++ b/root/etc/homeproxy/scripts/generate_client.uc
+@@ -483,13 +483,16 @@ const config = {};
+ config.dns = {
+ 	servers: [
+ 		{
+ 			tag: 'default-dns',
+-			type: 'udp',
+-			server: wan_dns,
++			/* Wy.House: encrypted bootstrap DNS. An IP DoH endpoint avoids
++			   both plaintext WAN DNS and a recursive resolver dependency. */
++			...parse_dnsserver(
++				(routing_mode === 'bypass_mainland_china') ? china_dns_server : 'https://1.1.1.1/dns-query'
++			),
+ 			detour: null
+ 		}
+ 	],
+ 	rules: [],
+ 	reverse_mapping: true,
+ 	strategy: dns_default_strategy
+ };

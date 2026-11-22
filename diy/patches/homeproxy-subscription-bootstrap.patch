@@ -1,0 +1,36 @@
+--- a/root/etc/homeproxy/scripts/update_subscriptions.uc
++++ b/root/etc/homeproxy/scripts/update_subscriptions.uc
+@@ -1232,6 +1232,33 @@
+ 		}
+ 	});
+ 
++	/* Wy.House: opt-in subscription bootstrap. Keep all usable subscription
++	   nodes in URLTest, fail certificate validation closed, and avoid the Go
++	   TLS fingerprint when sing-box provides uTLS. */
++	if (uci.get(uciconfig, ucisubscription, 'auto_urltest') === '1') {
++		let managed_nodes = [];
++		uci.foreach(uciconfig, ucinode, (cfg) => {
++			/* A direct outbound must never become an accidental proxy fallback. */
++			if (cfg.type === 'direct')
++				return;
++			push(managed_nodes, cfg['.name']);
++
++			if (cfg.tls === '1') {
++				if (cfg.tls_insecure !== '0')
++					uci.set(uciconfig, cfg['.name'], 'tls_insecure', '0');
++				if (sing_features.with_utls && isEmpty(cfg.tls_utls) &&
++				    !(cfg.type in ['hysteria', 'hysteria2', 'tuic']))
++					uci.set(uciconfig, cfg['.name'], 'tls_utls', 'chrome');
++			}
++		});
++
++		if (!length(managed_nodes))
++			die('Automatic URLTest has no usable proxy nodes.');
++
++		uci.set(uciconfig, 'config', 'main_node', 'urltest');
++		uci.set(uciconfig, 'config', 'main_urltest_nodes', managed_nodes);
++	}
++
+ 	reconcileUrltestNodes(uci, uciconfig, (message) => log(message));
+ 
+ 	const config_changed = !isEmpty(uci.changes(uciconfig));

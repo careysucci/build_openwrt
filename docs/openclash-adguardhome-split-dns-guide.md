@@ -461,47 +461,48 @@ uci commit nikki
 
 ## HomeProxy 备用方案
 
-文件：`diy/modules/36-homeproxy.sh`
+文件：`diy/modules/36-homeproxy.sh`、`diy/patches/homeproxy-*.patch`、`diy/scripts/setup-homeproxy.sh`
 
-HomeProxy（luci-app-homeproxy）是基于 **sing-box** 内核的 LuCI 前端，作为 OpenClash / Nikki 之外的第三种备用方案。打包阶段由 `36-homeproxy.sh` 自动写入 `/etc/config/homeproxy`，LuCI 界面读取的就是这份 UCI，因此**界面与配置文件天然一致**。
+HomeProxy（luci-app-homeproxy）是基于 **sing-box** 内核的 LuCI 前端。当前 small 版本由 UCI 动态生成运行配置，不能直接导入旧版静态 `sing-box` JSON。首启模块写入 `/etc/config/homeproxy`，订阅更新补丁负责把有效节点自动加入 URLTest。
 
-### 与 clash.yaml 的对应关系
+### 初始化策略
 
-| 需求 | clash.yaml 做法 | homeproxy 做法（本模块） |
-|------|----------------|--------------------------|
-| 国内直连保速 | China/IP + China/Domain → DIRECT | `routing_mode='bypass_mainland_china'`（国内 IP/域名直连，不进 sing-box 用户态） |
-| 国外走代理（含 YouTube） | GeoLocation-!CN / MATCH → 代理 | 默认出站 = 代理 |
-| 国内 DNS | nameserver-policy geosite:cn → 172.16.3.7 | `china_dns_server='172.16.3.7'` |
-| 国外 DNS（广告过滤） | nameserver → 172.16.3.6 | `dns_server='172.16.3.6'` |
-| 无 DNS 泄漏 | 仅内网 AGH，dnsmasq_noresolv | 仅内网 AGH（.6/.7），不使用任何 ISP/公网 DNS |
-| 无 IP 泄漏 | MATCH,国外 兜底 | 默认路由 = 代理；`sniff_override=1` 防 IP-only 漏判 |
-| IPv6 | ipv6: true | `ipv6_support='1'` |
-| 订阅 | proxy-providers cc-auto | `subscription` 段，复用同一 `CLASH_SUB_URL`（构建时注入） |
+| 需求 | HomeProxy 实现 |
+|------|----------------|
+| 国内直连保速 | `routing_mode='bypass_mainland_china'`，国内域名/IP 明确直连 |
+| 国外走代理 | 最终出站为 `main-out`，不设置直连兜底 |
+| 全端口接管 | 删除 `routing_port`；当前版本空值表示全部端口，`common` 会绕过非常见端口 |
+| 国内 DNS | `https://223.5.5.5/dns-query`，直连，不向公网发送明文 DNS |
+| 境外 DNS | `https://1.1.1.1/dns-query`，经 `main-out` 代理 |
+| 引导 DNS | 构建补丁将 WAN 明文 UDP 改为 IP 形式的直连 DoH，避免递归解析依赖 |
+| DNS 故障 | `dns.final='main-dns'`；境外查询超时或返回 SERVFAIL/REFUSED 时直接失败，不回退国内直连 DNS |
+| UDP/HTTP/3 | 不按端口禁用 UDP/443，由客户端、服务端与节点 UDP 能力正常协商 |
+| 自动选节点 | 订阅更新后全部非 `direct` 节点进入 URLTest，不需要手工选主节点 |
+| TLS | 强制 `tls_insecure=0`；缺少指纹设置且内核支持时使用 chrome uTLS |
+| 管理面 | 关闭 dashboard 和 HomeProxy server，减少监听面 |
+| IPv6 | `ipv6_support='1'`，继续受同一套路由规则约束 |
 
-> 说明：homeproxy 按**目的地址**分流——`.6` 自身查询国外上游（DoH 1.1.1.1）时目的为国外地址，会被自动判定走代理；`.7` 查询国内上游目的为国内地址，自动直连。无需像 clash 那样手写 SRC-IP 规则。
+> 境外主 DNS 固定经 `main-out`，不能填内网 `172.16.3.6`，否则会让远端节点访问其自身私网。国内直连属于明确分流，不是意外泄露；需要所有目的地都显示代理出口时，应改用全局代理，并接受国内访问变慢和引导解析的代价。
 
-### 默认禁用（安全）
+### 只替换订阅并启用
 
-与 Nikki 一致，homeproxy **默认禁用**（`main_node='nil'` + 服务 disable）。同一时间只能有一个透明代理占用 tproxy，OpenClash 仍是主力，**启用 homeproxy 不会自动发生，绝不影响当前网络与网速**。
-
-### 切换方式
+HomeProxy 默认禁用，避免与 OpenClash、Nikki 或 dae 同时接管流量。SSH 登录后执行：
 
 ```bash
-# 切换到 HomeProxy
-/etc/init.d/openclash stop
-/etc/init.d/nikki stop 2>/dev/null
-# LuCI → HomeProxy → 节点：更新订阅 → 选择一个节点作为「主节点」
-/etc/init.d/homeproxy enable
-/etc/init.d/homeproxy start
-
-# 切换回 OpenClash
-/etc/init.d/homeproxy stop
-/etc/init.d/homeproxy disable
-/etc/init.d/openclash start
+/root/setup-homeproxy.sh 'https://你的订阅地址'
 ```
 
-> ⚠️ OpenClash / Nikki / HomeProxy 三者互斥，任意时刻只启用一个。
-> ⚠️ 启用后请用 `nslookup youtube.com` 与泄漏检测站点确认：DNS 只命中内网 .6/.7，出口仅显示代理节点 IP。
+脚本先备份 UCI 与各代理的启用/运行状态，暂停旧 HomeProxy，再更新订阅并确认节点及自动 URLTest 非空。生成配置通过 `sing-box check` 后才停止其他透明代理；启动后还会做稳定性复查。任一阶段失败都会恢复原 UCI，并只重启此前确实运行的服务。订阅 URL 不会回显到终端。也可以在 LuCI 的订阅页面替换 URL，更新节点后手动启用。
+
+### 无法由路由器单独保证的边界
+
+- **DNS**：上述配置避免向公网发送明文应用 DNS，但首次订阅下载、节点域名引导解析和国内分流仍会按设计使用直连路径。订阅服务商、节点运营商及国内 DNS 上游都能看到各自处理的信息。
+- **IP**：国内站点和局域网目的会看到真实出口；境外是否只显示节点 IP 还取决于节点、IPv6、防火墙和客户端行为。
+- **WebRTC**：浏览器可在系统层面枚举本机网卡并暴露 host candidate，路由器 TUN/TPROXY 无法消除这一信息。应在浏览器中禁用 WebRTC，或限制为非代理 UDP，并用多个检测站点验证。
+- **SNI/指纹**：uTLS 只降低 Go ClientHello 指纹，不隐藏普通 TLS 的 SNI。隐藏 SNI 需要订阅节点支持 REALITY、ECH 等能力；节点服务器的 IP、流量时序和主动探测仍可能用于识别，无法承诺“不被针对”。
+- **QUIC/UDP**：只禁 QUIC 或全部 UDP 都不能解决上述 DNS、WebRTC host candidate 和普通 TLS SNI 边界，反而可能破坏 HTTP/3、WireGuard、游戏等应用，因此默认保留 UDP/443，不把协议禁用伪装成泄露防护。
+
+启用后应分别检查 IPv4/IPv6 出口、DNS、WebRTC 和浏览器 DoH/DoQ；任何单一检测网站都不足以证明绝对无泄露。
 
 ---
 

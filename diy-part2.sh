@@ -20,6 +20,109 @@ if [ ! -d "$TARGET_DIR" ]; then
     exit 1
 fi
 
+# ===== Add matching dae backend and LuCI app (official only) =====
+# This must run after the first feeds update: creating feeds/packages before
+# its git clone would make the update fail. The final feeds update preserves
+# these package directories as untracked files in their respective feeds.
+import_sparse_package() {
+    local repo_url="$1"
+    local branch="$2"
+    local source_path="$3"
+    local destination="$4"
+    local temp_dir
+
+    temp_dir=$(mktemp -d)
+    git clone --depth 1 --filter=blob:none --sparse -b "$branch" "$repo_url" "$temp_dir"
+    git -C "$temp_dir" sparse-checkout set "$source_path"
+    mkdir -p "$(dirname "$destination")"
+    rm -rf "$destination"
+    cp -a "$temp_dir/$source_path" "$destination"
+    rm -rf "$temp_dir"
+}
+
+if [ "$TARGET_DIR" = "official" ]; then
+    echo "[DIY-P2] Adding matching dae backend and LuCI app..."
+    DAE_FEED_BRANCH="${REPO_BRANCH:-openwrt-25.12}"
+    import_sparse_package "https://github.com/immortalwrt/packages.git" "$DAE_FEED_BRANCH" \
+        "net/dae" "$TARGET_DIR/feeds/packages/net/dae"
+    import_sparse_package "https://github.com/immortalwrt/luci.git" "$DAE_FEED_BRANCH" \
+        "applications/luci-app-dae" "$TARGET_DIR/feeds/luci/applications/luci-app-dae"
+fi
+
+# ===== Install the Wy.House dae configuration into the package =====
+# Keep upstream example.dae as a reference and install our file separately.
+# /etc/dae/config.dae is already a package conffile, so sysupgrade preserves
+# the user's subscription and later LuCI edits.
+echo "[DIY-P2] Installing the default dae configuration..."
+DAE_PKG_DIR="$TARGET_DIR/feeds/packages/net/dae"
+DAE_MAKEFILE="$DAE_PKG_DIR/Makefile"
+DAE_CONFIG_SRC="${GITHUB_WORKSPACE:-$PWD}/dae-config.dae"
+if [ ! -f "$DAE_MAKEFILE" ] || [ ! -f "$DAE_CONFIG_SRC" ]; then
+    echo "[ERROR] dae package Makefile or dae-config.dae is missing"
+    exit 1
+fi
+mkdir -p "$DAE_PKG_DIR/files"
+cp -f "$DAE_CONFIG_SRC" "$DAE_PKG_DIR/files/config.dae"
+
+DAE_EXAMPLE_INSTALL='$(INSTALL_CONF) $(PKG_BUILD_DIR)/example.dae $(1)/etc/dae/'
+DAE_CUSTOM_INSTALL='$(INSTALL_CONF) $(CURDIR)/files/config.dae $(1)/etc/dae/config.dae'
+if ! grep -Fq "$DAE_CUSTOM_INSTALL" "$DAE_MAKEFILE"; then
+    if ! grep -Fq "$DAE_EXAMPLE_INSTALL" "$DAE_MAKEFILE"; then
+        echo "[ERROR] Unsupported dae Makefile: example.dae install rule not found"
+        exit 1
+    fi
+    awk -v example_line="$DAE_EXAMPLE_INSTALL" '
+        index($0, example_line) {
+            print
+            print "\t$(INSTALL_CONF) $(CURDIR)/files/config.dae $(1)/etc/dae/config.dae"
+            next
+        }
+        { print }
+    ' "$DAE_MAKEFILE" > "$DAE_MAKEFILE.dae.tmp"
+    mv "$DAE_MAKEFILE.dae.tmp" "$DAE_MAKEFILE"
+fi
+grep -Fq "$DAE_CUSTOM_INSTALL" "$DAE_MAKEFILE" || {
+    echo "[ERROR] Failed to add the dae config.dae install rule"
+    exit 1
+}
+# The matched package's /etc/config/dae already has enabled=0 and points to
+# /etc/dae/config.dae. Do not reset that UCI file on every sysupgrade.
+
+# dae requires Linux 5.17 or newer. Reject unsupported branches explicitly
+# instead of shipping an eBPF service that cannot load (for example, the
+# Linux 5.15 kernel in official 23.05).
+DAE_KERNEL_PATCHVER=$(sed -n 's/^KERNEL_PATCHVER:=//p' "$TARGET_DIR/target/linux/x86/Makefile" | head -n 1)
+DAE_KERNEL_MAJOR="${DAE_KERNEL_PATCHVER%%.*}"
+DAE_KERNEL_MINOR="${DAE_KERNEL_PATCHVER#*.}"
+case "$DAE_KERNEL_MAJOR:$DAE_KERNEL_MINOR" in
+    *[!0-9:]*|'':*|*:'')
+        echo "[ERROR] Cannot parse the x86 kernel version for dae: $DAE_KERNEL_PATCHVER"
+        exit 1
+        ;;
+esac
+if [ "$DAE_KERNEL_MAJOR" -lt 5 ] || { [ "$DAE_KERNEL_MAJOR" -eq 5 ] && [ "$DAE_KERNEL_MINOR" -lt 17 ]; }; then
+    echo "[ERROR] dae requires Linux >= 5.17; $TARGET_DIR uses $DAE_KERNEL_PATCHVER"
+    exit 1
+fi
+
+# official 25.12 has no high-level KERNEL_BPF_STREAM_PARSER symbol. Add the
+# actual Linux option to the selected x86 target config instead of writing an
+# invalid CONFIG_KERNEL_* key that make defconfig would silently discard.
+if [ "$TARGET_DIR" = "official" ]; then
+    DAE_KERNEL_CONFIG="$TARGET_DIR/target/linux/x86/config-${DAE_KERNEL_PATCHVER}"
+    if [ ! -f "$DAE_KERNEL_CONFIG" ]; then
+        echo "[ERROR] Cannot locate the official x86 kernel config for dae"
+        exit 1
+    fi
+    if ! grep -q '^CONFIG_BPF_STREAM_PARSER=y$' "$DAE_KERNEL_CONFIG"; then
+        if grep -q '^# CONFIG_BPF_STREAM_PARSER is not set$' "$DAE_KERNEL_CONFIG"; then
+            sed -i 's/^# CONFIG_BPF_STREAM_PARSER is not set$/CONFIG_BPF_STREAM_PARSER=y/' "$DAE_KERNEL_CONFIG"
+        else
+            printf '\nCONFIG_BPF_STREAM_PARSER=y\n' >> "$DAE_KERNEL_CONFIG"
+        fi
+    fi
+fi
+
 # ===== Fix kmod-nf-ipt conflicts for Linux 6.12+ =====
 echo "[DIY-P2] Checking for kmod-nf-ipt fix..."
 if [ -f "$GITHUB_WORKSPACE/fix-kmod-nf-ipt-linux612.sh" ]; then
@@ -34,6 +137,48 @@ rm -rf "$TARGET_DIR"/feeds/small/luci-app-passwall 2>/dev/null || true
 rm -rf "$TARGET_DIR"/feeds/small/luci-app-passwall2 2>/dev/null || true
 rm -rf "$TARGET_DIR"/feeds/small/mihomo 2>/dev/null || true
 rm -rf "$TARGET_DIR"/feeds/small/luci-app-mihomo 2>/dev/null || true
+
+# ===== Add subscription-driven HomeProxy bootstrap =====
+# The stock updater removes stale URLTest nodes but never populates an empty
+# URLTest group. Patch it before the final feeds update so a user only needs to
+# supply a subscription URL; fail the build if this security-sensitive patch
+# no longer matches the selected small feed.
+HP_PKG_DIR="$TARGET_DIR/feeds/small/luci-app-homeproxy"
+HP_UPDATER="$HP_PKG_DIR/root/etc/homeproxy/scripts/update_subscriptions.uc"
+HP_GENERATOR="$HP_PKG_DIR/root/etc/homeproxy/scripts/generate_client.uc"
+HP_URLTEST_PATCH="${GITHUB_WORKSPACE:-$PWD}/diy/patches/homeproxy-subscription-bootstrap.patch"
+HP_DNS_PATCH="${GITHUB_WORKSPACE:-$PWD}/diy/patches/homeproxy-dns-bootstrap.patch"
+HP_DNS_FINAL_PATCH="${GITHUB_WORKSPACE:-$PWD}/diy/patches/homeproxy-dns-final.patch"
+HP_DNS_FAILCLOSED_PATCH="${GITHUB_WORKSPACE:-$PWD}/diy/patches/homeproxy-dns-failclosed.patch"
+HP_URLTEST_MARKER='Wy.House: opt-in subscription bootstrap.'
+HP_DNS_MARKER='Wy.House: encrypted bootstrap DNS.'
+HP_DNS_FINAL_MARKER='Wy.House: main DNS is the final resolver.'
+HP_DNS_FAILCLOSED_MARKER='Wy.House: fail closed on main DNS errors.'
+if [ ! -f "$HP_UPDATER" ] || [ ! -f "$HP_GENERATOR" ] || \
+   [ ! -f "$HP_URLTEST_PATCH" ] || [ ! -f "$HP_DNS_PATCH" ] || \
+   [ ! -f "$HP_DNS_FINAL_PATCH" ] || [ ! -f "$HP_DNS_FAILCLOSED_PATCH" ]; then
+    echo "[ERROR] HomeProxy scripts or bootstrap patches are missing"
+    exit 1
+fi
+
+apply_homeproxy_patch() {
+    local target_file="$1" patch_file="$2" marker="$3" label="$4"
+    if grep -Fq "$marker" "$target_file"; then
+        return 0
+    fi
+    echo "[DIY-P2] Applying HomeProxy $label patch..."
+    patch --dry-run -d "$HP_PKG_DIR" -p1 < "$patch_file"
+    patch -d "$HP_PKG_DIR" -p1 < "$patch_file"
+    grep -Fq "$marker" "$target_file" || {
+        echo "[ERROR] Failed to apply the HomeProxy $label patch"
+        exit 1
+    }
+}
+# Independent transactions also recover correctly from a half-applied tree.
+apply_homeproxy_patch "$HP_UPDATER" "$HP_URLTEST_PATCH" "$HP_URLTEST_MARKER" "subscription bootstrap"
+apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_PATCH" "$HP_DNS_MARKER" "encrypted bootstrap DNS"
+apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_FINAL_PATCH" "$HP_DNS_FINAL_MARKER" "final DNS"
+apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_FAILCLOSED_PATCH" "$HP_DNS_FAILCLOSED_MARKER" "fail-closed DNS"
 
 # ===== Fix luci-app-netspeedtest stale dependency (LEDE only) =====
 # sirpdboy/netspeedtest still declares +python3-pkg-resources, which no longer

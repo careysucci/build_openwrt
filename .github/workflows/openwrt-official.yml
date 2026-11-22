@@ -148,6 +148,12 @@ jobs:
         run: |
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
+          # Keep HomeProxy AI Edition and sing-box on the same feed. Otherwise
+          # install -a may pair small's HomeProxy with packages' older sing-box,
+          # which fails APK dependency resolution during rootfs assembly.
+          ./scripts/feeds install -f -p small sing-box luci-app-homeproxy
+          # DIY Part 2 imports the matched dae directories after this first
+          # feeds update; they are selected after the final feeds install.
           # update golang
           rm -rf feeds/packages/lang/golang
           git clone https://github.com/kenzok8/golang -b ${{inputs.golang_verson}} feeds/packages/lang/golang
@@ -166,6 +172,10 @@ jobs:
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
+          # The second install -a must not reintroduce the cross-feed mismatch.
+          ./scripts/feeds install -f -p small sing-box luci-app-homeproxy
+          ./scripts/feeds install -f -p packages dae
+          ./scripts/feeds install -f -p luci luci-app-dae
           cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           make defconfig
 
@@ -254,7 +264,7 @@ jobs:
 
       - name: Organize files
         id: organize
-        if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+        if: success() && env.UPLOAD_FIRMWARE == 'true'
         run: |
           cd ${{ env.TARGET_MATRIX }}/bin/targets/*/*
           rm -rf packages
@@ -266,26 +276,28 @@ jobs:
 
       - name: Upload firmware directory
         uses: actions/upload-artifact@main
-        if: steps.organize.outputs.status == 'success' && !cancelled()
+        if: success() && steps.organize.outputs.status == 'success'
         with:
           name: ${{ env.IMG_PREFIX }}_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
       - name: Generate release tag
         id: tag
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        if: success() && env.UPLOAD_RELEASE == 'true'
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           touch release.txt
           echo "OpenWrt Official Build" >> release.txt
           echo "Target: ${{ env.RELEASE_NAME }}" >> release.txt
           echo "Date: $(date)" >> release.txt
-          [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
+          if [ "${UPLOAD_GOFILE:-false}" = "true" ] && [ -n "${{ steps.gofile.outputs.url }}" ]; then
+            echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
+          fi
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@master
-        if: steps.tag.outputs.status == 'success' && !cancelled()
+        if: success() && steps.tag.outputs.status == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
         with:
@@ -301,7 +313,7 @@ jobs:
 
       - name: Remove old Releases
         uses: dev-drprasad/delete-older-releases@master
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        if: success() && env.UPLOAD_RELEASE == 'true'
         with:
           keep_latest: 8
           delete_tags: true

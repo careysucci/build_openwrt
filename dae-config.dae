@@ -1,0 +1,95 @@
+# Wy.House default configuration for dae.
+# Compatible with the dae v0.6.0 and v1.0.0 configuration syntax.
+#
+# Before enabling dae:
+# 1. Replace the my_sub URL below with your own subscription URL.
+# 2. Stop other transparent proxy services such as OpenClash, Nikki and HomeProxy.
+# 3. Save this file, then enable dae in LuCI > Services > dae > Settings.
+#
+# LuCI edits /etc/dae/config.dae directly. No other placeholder needs changing.
+#
+# Privacy boundary: Chinese domains/IPs are intentionally direct. The LAN DNS
+# hops use plaintext UDP only inside the trusted Wy.House LAN; their public
+# upstreams must be encrypted in AdGuard Home. WebRTC host candidates and
+# ordinary TLS SNI cannot be hidden by dae alone.
+
+global {
+    tproxy_port: 12345
+    tproxy_port_protect: true
+    so_mark_from_dae: 0
+    # 只记录警告，减少目的域名和节点信息落盘。
+    log_level: warn
+    disable_waiting_network: false
+    enable_local_tcp_fast_redirect: false
+
+    # Proxy both LAN clients and traffic originating from the router itself.
+    lan_interface: br-lan
+    wan_interface: auto
+    auto_config_kernel_parameter: true
+
+    tcp_check_url: 'http://cp.cloudflare.com,1.1.1.1,2606:4700:4700::1111'
+    tcp_check_http_method: HEAD
+    udp_check_dns: 'dns.google.com:53,8.8.8.8,2001:4860:4860::8888'
+    check_interval: 60s
+    check_tolerance: 100ms
+
+    dial_mode: domain
+    allow_insecure: false
+    sniffing_timeout: 100ms
+    # uTLS 仅降低 Go ClientHello 指纹；它不能隐藏普通 TLS 的 SNI。
+    # 需要 REALITY/ECH 等由订阅节点明确提供的协议能力才能进一步隐藏。
+    tls_implementation: utls
+    utls_imitate: chrome_auto
+}
+
+subscription {
+    # The only value you must replace. Keep the my_sub tag unchanged.
+    my_sub: 'https://replace-with-your-subscription.invalid/subscription'
+}
+
+group {
+    proxy {
+        # Use nodes from my_sub only; discard common informational nodes.
+        filter: subtag(my_sub) && !name(keyword: 'ExpireAt:') && !name(keyword: '剩余流量') && !name(keyword: '套餐到期') && !name(keyword: '官方网址')
+        policy: min_moving_avg
+    }
+}
+
+dns {
+    upstream {
+        # Domestic AdGuard Home and overseas AdGuard Home in the Wy.House LAN.
+        adguard_home_cn: 'udp://172.16.3.7:53'
+        adguard_home_global: 'udp://172.16.3.6:53'
+    }
+    routing {
+        request {
+            qname(geosite:cn) -> adguard_home_cn
+            fallback: adguard_home_global
+        }
+        response {
+            # The overseas upstream is trusted. Re-check polluted private-IP
+            # answers from the domestic upstream for non-Chinese domains.
+            upstream(adguard_home_global) -> accept
+            ip(geoip:private) && !qname(geosite:cn) -> adguard_home_global
+            fallback: accept
+        }
+    }
+}
+
+routing {
+    # Keep local, multicast and reserved traffic out of the proxy.
+    dip(224.0.0.0/3, 'ff00::/8') -> direct
+    dip(geoip:private) -> direct
+
+    # 不禁用 UDP/443：QUIC/HTTP/3 与 TCP 由客户端、服务端及节点 UDP
+    # 能力正常协商。禁用 QUIC 不能消除 WebRTC host candidate 或普通 TLS SNI。
+
+    # .6 的境外 DNS 上游必须走代理；.7 仅国内目的直连，其他流量仍走代理。
+    # 内网目的已由上面的 private 规则处理。
+    sip(172.16.3.7) && dip(geoip:cn) -> direct
+    sip(172.16.3.6) -> proxy
+
+    domain(geosite:cn) -> direct
+    dip(geoip:cn) -> direct
+    fallback: proxy
+}

@@ -1,0 +1,13 @@
+--- a/root/etc/homeproxy/scripts/generate_client.uc
++++ b/root/etc/homeproxy/scripts/generate_client.uc
+@@ -503,7 +503,8 @@ const config = {};
+ 		...parse_dnsserver(dns_server, 'tcp')
+ 	});
+-	/* Bypass mode resolves everything unmatched through the mainland server. */
+-	config.dns.final = (routing_mode === 'bypass_mainland_china') ? 'china-dns' : 'main-dns';
++	/* Wy.House: main DNS is the final resolver. A failed proxied evaluation
++	   must never fall through to the direct mainland DNS server. */
++	config.dns.final = 'main-dns';
+ 
+ 	if (tailscale_enabled) {
+ 		push(config.dns.servers, {

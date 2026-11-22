@@ -12,7 +12,8 @@
 #      a. vernesong/OpenClash releases (clash_meta-linux-amd64-compatible.gz / v1 variant)
 #      b. MetaCubeX/mihomo releases    (mihomo-linux-amd64-compatible-v*.gz, renamed)
 #      Binary installed as /etc/openclash/core/clash_meta
-#   3. Install oc-bootstrap.sh helper for first-time node setup
+#   3. Install first-time setup helpers for OpenClash, Nikki and HomeProxy
+#   4. Install oc-bootstrap.sh helper for cache-only node setup
 #
 # UCI: core_type=Meta / core_version=linux-amd64-v1
 # Binary path in firmware: /etc/openclash/core/clash_meta
@@ -248,7 +249,20 @@ else
     echo "[build-openclash] WARNING: setup-nikki.sh not found at $_SETUP_NK_SRC — skipping"
 fi
 
-# c) oc-bootstrap.sh → /usr/lib/wyhome/oc-bootstrap.sh
+# c) setup-homeproxy.sh → /root/setup-homeproxy.sh
+#    Updates and pre-validates the subscription, then switches proxies with
+#    automatic UCI/service rollback on generation, startup or enable failure.
+_SETUP_HP_SRC="$GITHUB_WORKSPACE/diy/scripts/setup-homeproxy.sh"
+_SETUP_HP_DST="$TARGET_DIR/package/base-files/files/root/setup-homeproxy.sh"
+if [ -f "$_SETUP_HP_SRC" ]; then
+    cp -f "$_SETUP_HP_SRC" "$_SETUP_HP_DST"
+    chmod +x "$_SETUP_HP_DST"
+    echo "[build-openclash] Setup script installed: /root/setup-homeproxy.sh"
+else
+    echo "[build-openclash] WARNING: setup-homeproxy.sh not found at $_SETUP_HP_SRC — skipping"
+fi
+
+# d) oc-bootstrap.sh → /usr/lib/wyhome/oc-bootstrap.sh
 #    Lightweight variant (cache-only, no YAML modification).
 _BOOTSTRAP_SRC="$GITHUB_WORKSPACE/diy/scripts/oc-bootstrap.sh"
 _BOOTSTRAP_DST="$TARGET_DIR/package/base-files/files/usr/lib/wyhome/oc-bootstrap.sh"
@@ -264,6 +278,6 @@ fi
 # Clean up temp vars and functions (sourced into parent scope)
 unset _OC_CFG_DIR _OC_PROV_DIR _YAML_SRC _CORE_DIR _CORE_DEST _CORE_INSTALLED
 unset _NK_PROF_DIR _NK_YAML_SRC _SETUP_SRC _SETUP_DST _SETUP_NK_SRC _SETUP_NK_DST
-unset _BOOTSTRAP_SRC _BOOTSTRAP_DST
+unset _SETUP_HP_SRC _SETUP_HP_DST _BOOTSTRAP_SRC _BOOTSTRAP_DST
 unset _OC_CORE_URL _OC_PAT _MH_CORE_URL _MH_PAT
 unset -f _oc_fetch_core _oc_find_asset _oc_find_asset_latest _inject_sub_url 2>/dev/null || true

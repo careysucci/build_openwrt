@@ -135,6 +135,10 @@ jobs:
         run: |
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
+          # Keep dae and its geo-data subpackages on the packages feed; small's
+          # standalone dae does not provide dae-geoip/dae-geosite.
+          ./scripts/feeds install -f -p packages dae
+          ./scripts/feeds install -f -p luci luci-app-dae
           # update golang — use selected branch if provided (workflow_dispatch),
           # otherwise clone latest (repository_dispatch has no inputs)
           rm -rf feeds/packages/lang/golang
@@ -158,6 +162,8 @@ jobs:
           chmod +x ./$DIY_P2_SH && ./$DIY_P2_SH
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
+          ./scripts/feeds install -f -p packages dae
+          ./scripts/feeds install -f -p luci luci-app-dae
           cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FILE }} .config
           make defconfig
 

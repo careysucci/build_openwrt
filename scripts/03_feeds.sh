@@ -21,7 +21,9 @@ cd "${WORKSPACE}/${TARGET_MATRIX}" || exit 1
 log_progress "Running DIY Part 1 (before feeds)..."
 if [ -f "${WORKSPACE}/${DIY_P1_SH}" ]; then
   chmod +x "${WORKSPACE}/${DIY_P1_SH}"
+  cd "${WORKSPACE}" || exit 1
   source "${WORKSPACE}/${DIY_P1_SH}" || log_warn "DIY P1 warning"
+  cd "${WORKSPACE}/${TARGET_MATRIX}" || exit 1
 else
   log_warn "DIY Part 1 script not found"
 fi
@@ -30,6 +32,19 @@ log_progress "Updating feeds..."
 if ./scripts/feeds update -a 2>&1; then
   log_progress "Installing feeds..."
   ./scripts/feeds install -a 2>&1 || log_warn "Feed install warning"
+  if [ "${TARGET_MATRIX}" = "official" ]; then
+    # HomeProxy AI Edition requires the matching sing-box from the same feed.
+    # A cross-feed selection can otherwise fail only during APK rootfs assembly.
+    log_progress "Selecting matched HomeProxy and sing-box packages..."
+    ./scripts/feeds install -f -p small sing-box luci-app-homeproxy 2>&1
+  fi
+  if [ "${TARGET_MATRIX}" = "lede" ]; then
+    # luci-app-dae also needs dae-geoip/dae-geosite from the packages feed.
+    # Official imports its matched dae directories in DIY Part 2 instead.
+    log_progress "Selecting matched dae backend and LuCI packages..."
+    ./scripts/feeds install -f -p packages dae 2>&1
+    ./scripts/feeds install -f -p luci luci-app-dae 2>&1
+  fi
 else
   log_error "Failed to update feeds"
   exit 1
