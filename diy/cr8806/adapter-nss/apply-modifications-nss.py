@@ -147,6 +147,21 @@ patch_file(
 # tree's package/base-files/files/lib/upgrade/stage2).
 patch_file(
     "target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh",
+    "mi_dualboot_check_image",
+    [(
+        'platform_check_image() {\n',
+        '\tcase "$(board_name)" in\n'
+        "\tredmi,ax3000)\n"
+        '\t\tmi_dualboot_check_image "$1"\n'
+        "\t\treturn $?\n"
+        "\t\t;;\n"
+        "\tesac\n",
+        "after",
+    )],
+)
+
+patch_file(
+    "target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh",
     "mi_dualboot_do_upgrade",
     [(
         'platform_do_upgrade() {\n\tcase "$(board_name)" in\n',

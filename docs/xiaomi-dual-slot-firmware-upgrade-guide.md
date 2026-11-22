@@ -63,15 +63,36 @@ FW=/tmp/factory.ubi
 
 `ubiformat` 会擦除目标 MTD 并重建整个 UBI；`ubiupdatevol` 只更新一个已存在的 UBI 卷。完整 factory UBI 不能交给 `ubiupdatevol`。
 
-## 2. 当前构建为何需要手动 tar 流程
+## 2. 新版构建：直接使用 LuCI 或 sysupgrade
 
-当前设备的 `/lib/upgrade/mi_dualboot.sh` 仍有以下限制：
+包含本次修复的构建已接通完整的 tar sysupgrade 路径：
 
-1. `mi_dualboot_check_image` 只接受文件头为 `UBI` 的镜像；
-2. `mi_dualboot_do_upgrade` 直接把输入文件交给 `ubiformat`；
-3. tar sysupgrade 与该接口不匹配。
+1. `platform_check_image` 会调用 `mi_dualboot_check_image`，在停止服务前校验板型、tar 完整性、当前槽和 U-Boot 环境；
+2. `mi_dualboot_do_upgrade` 使用 `nand_do_flash_file`，按内容分别处理 tar sysupgrade 与裸 UBI；
+3. 写入后必须存在 kernel/rootfs 卷，配置恢复成功后才切换启动槽。
 
-因此，在这项构建逻辑修复前，不建议把当前 tar `sysupgrade.bin` 直接交给旧版 LuCI/sysupgrade 双分区路径。下面的手动流程实际调用 OpenWrt 自带的 `nand_do_flash_file`，它会识别 tar 并分别创建、写入 kernel/rootfs/rootfs_data 卷。
+上传正确型号的 `*-squashfs-sysupgrade.bin` 后，可先执行只读校验：
+
+```sh
+sysupgrade -T /tmp/sysupgrade.bin
+```
+
+校验通过后，可在 LuCI 的“备份/升级”页面刷写并保留配置，或执行：
+
+```sh
+sysupgrade -v /tmp/sysupgrade.bin
+```
+
+命令成功后会自动重启到新槽。启动后仍须按第 8 节检查实际版本、当前槽、持久 overlay、配置和网络，不能仅凭命令返回就认定升级完成。
+
+可检查当前运行固件是否已经包含该修复：
+
+```sh
+grep -F 'nand_do_flash_file "$1" cat' /lib/upgrade/mi_dualboot.sh
+grep -F 'mi_dualboot_check_image "$1"' /lib/upgrade/platform.sh
+```
+
+两条命令都应找到对应内容。**旧固件的前置检查没有接入双分区校验，即使 `sysupgrade -T` 返回成功，也不代表旧升级函数能写入 tar。** 旧固件请先使用第 3～7 节的手动流程升级到包含修复的固件；该流程同样调用 `nand_do_flash_file`，分别创建、写入 kernel/rootfs/rootfs_data 卷。
 
 ## 3. 升级前准备
 
