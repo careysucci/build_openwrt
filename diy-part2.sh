@@ -53,10 +53,16 @@ fi
 # Keep upstream example.dae as a reference and install our file separately.
 # /etc/dae/config.dae is already a package conffile, so sysupgrade preserves
 # the user's subscription and later LuCI edits.
-echo "[DIY-P2] Installing the default dae configuration..."
+# Only builds that actually ship dae need this section. Official imports the
+# package above, so a missing Makefile there stays a hard error; other targets
+# without dae skip everything instead of failing on an irrelevant check.
 DAE_PKG_DIR="$TARGET_DIR/feeds/packages/net/dae"
 DAE_MAKEFILE="$DAE_PKG_DIR/Makefile"
 DAE_CONFIG_SRC="${GITHUB_WORKSPACE:-$PWD}/dae-config.dae"
+if [ ! -f "$DAE_MAKEFILE" ] && [ "$TARGET_DIR" != "official" ]; then
+    echo "[DIY-P2] dae package not present, skipping dae configuration"
+else
+echo "[DIY-P2] Installing the default dae configuration..."
 if [ ! -f "$DAE_MAKEFILE" ] || [ ! -f "$DAE_CONFIG_SRC" ]; then
     echo "[ERROR] dae package Makefile or dae-config.dae is missing"
     exit 1
@@ -122,6 +128,7 @@ if [ "$TARGET_DIR" = "official" ]; then
         fi
     fi
 fi
+fi  # end of the dae package-presence gate
 
 # ===== Fix kmod-nf-ipt conflicts for Linux 6.12+ =====
 echo "[DIY-P2] Checking for kmod-nf-ipt fix..."
@@ -154,7 +161,12 @@ HP_URLTEST_MARKER='Wy.House: opt-in subscription bootstrap.'
 HP_DNS_MARKER='Wy.House: encrypted bootstrap DNS.'
 HP_DNS_FINAL_MARKER='Wy.House: main DNS is the final resolver.'
 HP_DNS_FAILCLOSED_MARKER='Wy.House: fail closed on main DNS errors.'
-if [ ! -f "$HP_UPDATER" ] || [ ! -f "$HP_GENERATOR" ] || \
+# Builds without luci-app-homeproxy skip these patches entirely. When the
+# package is present every check below stays fatal: these security-sensitive
+# DNS/subscription patches must never be silently skipped.
+if [ ! -d "$HP_PKG_DIR" ]; then
+    echo "[DIY-P2] luci-app-homeproxy not present, skipping HomeProxy patches"
+elif [ ! -f "$HP_UPDATER" ] || [ ! -f "$HP_GENERATOR" ] || \
    [ ! -f "$HP_URLTEST_PATCH" ] || [ ! -f "$HP_DNS_PATCH" ] || \
    [ ! -f "$HP_DNS_FINAL_PATCH" ] || [ ! -f "$HP_DNS_FAILCLOSED_PATCH" ]; then
     echo "[ERROR] HomeProxy scripts or bootstrap patches are missing"
@@ -175,10 +187,12 @@ apply_homeproxy_patch() {
     }
 }
 # Independent transactions also recover correctly from a half-applied tree.
-apply_homeproxy_patch "$HP_UPDATER" "$HP_URLTEST_PATCH" "$HP_URLTEST_MARKER" "subscription bootstrap"
-apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_PATCH" "$HP_DNS_MARKER" "encrypted bootstrap DNS"
-apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_FINAL_PATCH" "$HP_DNS_FINAL_MARKER" "final DNS"
-apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_FAILCLOSED_PATCH" "$HP_DNS_FAILCLOSED_MARKER" "fail-closed DNS"
+if [ -d "$HP_PKG_DIR" ]; then
+    apply_homeproxy_patch "$HP_UPDATER" "$HP_URLTEST_PATCH" "$HP_URLTEST_MARKER" "subscription bootstrap"
+    apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_PATCH" "$HP_DNS_MARKER" "encrypted bootstrap DNS"
+    apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_FINAL_PATCH" "$HP_DNS_FINAL_MARKER" "final DNS"
+    apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_FAILCLOSED_PATCH" "$HP_DNS_FAILCLOSED_MARKER" "fail-closed DNS"
+fi
 
 # ===== Fix luci-app-netspeedtest stale dependency (LEDE only) =====
 # sirpdboy/netspeedtest still declares +python3-pkg-resources, which no longer
@@ -187,13 +201,19 @@ apply_homeproxy_patch "$HP_GENERATOR" "$HP_DNS_FAILCLOSED_PATCH" "$HP_DNS_FAILCL
 # Runs before the final 'feeds update' (git pull --ff-only), which preserves
 # this working-tree edit as long as upstream leaves the Makefile untouched.
 if [ "$TARGET_DIR" = "lede" ]; then
-    echo "[DIY-P2] Fixing luci-app-netspeedtest stale python3-pkg-resources dependency..."
     NETSPEEDTEST_MK="$TARGET_DIR/feeds/netspeedtest/luci-app-netspeedtest/Makefile"
-    if [ -f "$NETSPEEDTEST_MK" ]; then
-        sed -i 's/ +python3-pkg-resources//g' "$NETSPEEDTEST_MK" || true
-        echo "[DIY-P2] netspeedtest dependency fix applied"
-    else
+    if [ ! -f "$NETSPEEDTEST_MK" ]; then
         echo "[DIY-P2] netspeedtest feed not present, skipping"
+    elif ! grep -q '+python3-pkg-resources' "$NETSPEEDTEST_MK"; then
+        echo "[DIY-P2] netspeedtest dependency already clean upstream, nothing to do"
+    else
+        echo "[DIY-P2] Fixing luci-app-netspeedtest stale python3-pkg-resources dependency..."
+        sed -i 's/ +python3-pkg-resources//g' "$NETSPEEDTEST_MK"
+        if grep -q '+python3-pkg-resources' "$NETSPEEDTEST_MK"; then
+            echo "[ERROR] Failed to remove python3-pkg-resources from luci-app-netspeedtest"
+            exit 1
+        fi
+        echo "[DIY-P2] netspeedtest dependency fix applied"
     fi
 fi
 
