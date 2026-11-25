@@ -38,6 +38,17 @@ else
   exit 1
 fi
 
+if [ "$TARGET_MATRIX" = "official" ]; then
+  log_progress "Verifying final BPF toolchain configuration..."
+  for symbol in CONFIG_DEVEL=y CONFIG_BPF_TOOLCHAIN_HOST=y CONFIG_USE_LLVM_HOST=y; do
+    if ! grep -Fxq "$symbol" ./.config; then
+      log_error "Missing $symbol after make defconfig"
+      exit 1
+    fi
+  done
+  log_success "Host LLVM configuration verified"
+fi
+
 # Backup config
 cp_safe ./.config "${WORKSPACE}/output/.config.backup"
 

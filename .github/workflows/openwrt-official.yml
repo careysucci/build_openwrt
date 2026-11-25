@@ -192,6 +192,17 @@ jobs:
             echo "[WARNING] Fix script not found, skipping firewall4 configuration"
           fi
 
+      - name: Verify BPF toolchain configuration
+        run: |
+          cd ${{ env.TARGET_MATRIX }}
+          for symbol in CONFIG_DEVEL=y CONFIG_BPF_TOOLCHAIN_HOST=y CONFIG_USE_LLVM_HOST=y; do
+            if ! grep -Fxq "$symbol" .config; then
+              echo "[ERROR] Missing $symbol after final make defconfig"
+              exit 1
+            fi
+          done
+          echo "[WORKFLOW] Host LLVM configuration verified"
+
       - name: SSH Enabled Debug
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.ssh_enabled }}
         uses: mxschmitt/action-tmate@v3
