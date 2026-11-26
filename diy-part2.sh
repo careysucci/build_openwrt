@@ -140,6 +140,11 @@ fi
 
 # ===== Clean duplicate packages from small feed =====
 echo "[DIY-P2] Cleaning duplicate packages from small feed..."
+if [ "$TARGET_DIR" = "official" ]; then
+    # Use the imported packages/dae; small/dae requires a patch absent from that feed.
+    rm -rf "$TARGET_DIR"/feeds/small/dae 2>/dev/null || true
+    rm -rf "$TARGET_DIR"/package/feeds/small/dae 2>/dev/null || true
+fi
 rm -rf "$TARGET_DIR"/feeds/small/luci-app-passwall 2>/dev/null || true
 rm -rf "$TARGET_DIR"/feeds/small/luci-app-passwall2 2>/dev/null || true
 rm -rf "$TARGET_DIR"/feeds/small/mihomo 2>/dev/null || true
