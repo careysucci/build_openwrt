@@ -36,6 +36,7 @@ if ./scripts/feeds update -a 2>&1; then
     # HomeProxy AI Edition requires the matching sing-box from the same feed.
     # A cross-feed selection can otherwise fail only during APK rootfs assembly.
     log_progress "Selecting matched HomeProxy and sing-box packages..."
+    ./scripts/feeds uninstall sing-box luci-app-homeproxy 2>&1
     ./scripts/feeds install -f -p small sing-box luci-app-homeproxy 2>&1
   fi
   if [ "${TARGET_MATRIX}" = "lede" ]; then

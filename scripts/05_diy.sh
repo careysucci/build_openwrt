@@ -33,6 +33,11 @@ fi
 log_progress "Final feeds update after DIY..."
 if ./scripts/feeds update -a 2>&1; then
   ./scripts/feeds install -a 2>&1 || log_warn "Feed install warning"
+  if [ "${TARGET_MATRIX}" = "official" ]; then
+    log_progress "Restoring matched HomeProxy and sing-box packages..."
+    ./scripts/feeds uninstall sing-box luci-app-homeproxy 2>&1
+    ./scripts/feeds install -f -p small sing-box luci-app-homeproxy 2>&1
+  fi
   log_progress "Restoring matched dae backend and LuCI packages..."
   ./scripts/feeds install -f -p packages dae 2>&1
   ./scripts/feeds install -f -p luci luci-app-dae 2>&1

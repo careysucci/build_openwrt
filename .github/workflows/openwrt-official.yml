@@ -151,6 +151,7 @@ jobs:
           # Keep HomeProxy AI Edition and sing-box on the same feed. Otherwise
           # install -a may pair small's HomeProxy with packages' older sing-box,
           # which fails APK dependency resolution during rootfs assembly.
+          ./scripts/feeds uninstall sing-box luci-app-homeproxy
           ./scripts/feeds install -f -p small sing-box luci-app-homeproxy
           # DIY Part 2 imports the matched dae directories after this first
           # feeds update; they are selected after the final feeds install.
@@ -173,6 +174,7 @@ jobs:
           cd ${{ env.TARGET_MATRIX }}
           ./scripts/feeds update -a && ./scripts/feeds install -a
           # The second install -a must not reintroduce the cross-feed mismatch.
+          ./scripts/feeds uninstall sing-box luci-app-homeproxy
           ./scripts/feeds install -f -p small sing-box luci-app-homeproxy
           ./scripts/feeds install -f -p packages dae
           ./scripts/feeds install -f -p luci luci-app-dae
