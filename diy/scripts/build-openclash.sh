@@ -229,7 +229,7 @@ _SETUP_SRC="$GITHUB_WORKSPACE/diy/scripts/setup-openclash.sh"
 _SETUP_DST="$TARGET_DIR/package/base-files/files/root/setup-openclash.sh"
 mkdir -p "$(dirname "$_SETUP_DST")"
 if [ -f "$_SETUP_SRC" ]; then
-    cp -f "$_SETUP_SRC" "$_SETUP_DST"
+    sed 's/\r$//' "$_SETUP_SRC" > "$_SETUP_DST"
     chmod +x "$_SETUP_DST"
     echo "[build-openclash] Setup script installed: /root/setup-openclash.sh"
 else
@@ -242,7 +242,7 @@ fi
 _SETUP_NK_SRC="$GITHUB_WORKSPACE/diy/scripts/setup-nikki.sh"
 _SETUP_NK_DST="$TARGET_DIR/package/base-files/files/root/setup-nikki.sh"
 if [ -f "$_SETUP_NK_SRC" ]; then
-    cp -f "$_SETUP_NK_SRC" "$_SETUP_NK_DST"
+    sed 's/\r$//' "$_SETUP_NK_SRC" > "$_SETUP_NK_DST"
     chmod +x "$_SETUP_NK_DST"
     echo "[build-openclash] Setup script installed: /root/setup-nikki.sh"
 else
@@ -255,7 +255,7 @@ fi
 _SETUP_HP_SRC="$GITHUB_WORKSPACE/diy/scripts/setup-homeproxy.sh"
 _SETUP_HP_DST="$TARGET_DIR/package/base-files/files/root/setup-homeproxy.sh"
 if [ -f "$_SETUP_HP_SRC" ]; then
-    cp -f "$_SETUP_HP_SRC" "$_SETUP_HP_DST"
+    sed 's/\r$//' "$_SETUP_HP_SRC" > "$_SETUP_HP_DST"
     chmod +x "$_SETUP_HP_DST"
     echo "[build-openclash] Setup script installed: /root/setup-homeproxy.sh"
 else
@@ -268,7 +268,7 @@ _BOOTSTRAP_SRC="$GITHUB_WORKSPACE/diy/scripts/oc-bootstrap.sh"
 _BOOTSTRAP_DST="$TARGET_DIR/package/base-files/files/usr/lib/wyhome/oc-bootstrap.sh"
 mkdir -p "$(dirname "$_BOOTSTRAP_DST")"
 if [ -f "$_BOOTSTRAP_SRC" ]; then
-    cp -f "$_BOOTSTRAP_SRC" "$_BOOTSTRAP_DST"
+    sed 's/\r$//' "$_BOOTSTRAP_SRC" > "$_BOOTSTRAP_DST"
     chmod +x "$_BOOTSTRAP_DST"
     echo "[build-openclash] Bootstrap helper installed: /usr/lib/wyhome/oc-bootstrap.sh"
 else

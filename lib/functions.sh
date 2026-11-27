@@ -174,7 +174,7 @@ make_download() {
     log_progress "Running make download [attempt $((retry+1))/$max_retries]"
     if make download -j$((NPROC+1)) 2>&1; then
       # Remove incomplete files
-      find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
+      find dl -maxdepth 1 -type f -size -1024c -exec rm -f {} \; 2>/dev/null || true
       cd - || return 1
       log_success "Package download completed"
       return 0

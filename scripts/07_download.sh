@@ -33,7 +33,7 @@ fi
 
 # Remove incomplete downloads and retry
 log_progress "Cleaning incomplete downloads..."
-find dl -size -1024c -exec rm -f {} \; 2>/dev/null || true
+find dl -maxdepth 1 -type f -size -1024c -exec rm -f {} \; 2>/dev/null || true
 
 log_progress "Downloading packages (second pass)..."
 if make_download "." 2>&1; then

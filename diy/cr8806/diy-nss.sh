@@ -71,7 +71,8 @@ BANNER_FILE="${BANNER_FILE:-banner}"
 if [ -f "diy/${BANNER_FILE}" ] && [ -d "$TARGET_DIR/package/base-files/files/etc" ]; then
     if [ "${BANNER_FILE}" = "banner-wyhousewrt" ]; then
         mkdir -p "$TARGET_DIR/package/base-files/files/etc/profile.d"
-        sed -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
+        sed -e 's/\r$//' \
+            -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
             -e "s#__BUILD_DATE__#$(date +'%Y-%m-%d')#g" \
             "diy/${BANNER_FILE}" \
             > "$TARGET_DIR/package/base-files/files/etc/profile.d/99-wyhouse-banner.sh" || true
@@ -130,8 +131,8 @@ fi
 # ===== Install first-boot provisioning (NSS variant) =====
 mkdir -p "$TARGET_DIR/package/base-files/files/etc/uci-defaults"
 if [ -f "diy/cr8806/99-ap-bridge-nss" ]; then
-    cp -f diy/cr8806/99-ap-bridge-nss \
-        "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge-nss"
+    sed 's/\r$//' diy/cr8806/99-ap-bridge-nss \
+        > "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge-nss"
     chmod +x "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge-nss"
     echo "[DIY-NSS] 99-ap-bridge-nss installed (stock router defaults + WiFi roaming; NSS plane left to the tree's own defaults)"
 else

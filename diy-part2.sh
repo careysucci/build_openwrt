@@ -251,7 +251,8 @@ if [ -d "$TARGET_DIR/package/base-files/files/etc" ]; then
     if [ -f "diy/${BANNER_FILE}" ]; then
         if [ "${BANNER_FILE}" = "banner-wyhousewrt" ]; then
             mkdir -p "$TARGET_DIR/package/base-files/files/etc/profile.d"
-            sed -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
+            sed -e 's/\r$//' \
+                -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
                 -e "s#__BUILD_DATE__#$(date +'%Y-%m-%d')#g" \
                 "diy/${BANNER_FILE}" \
                 > "$TARGET_DIR/package/base-files/files/etc/profile.d/99-wyhouse-banner.sh" || true
@@ -320,7 +321,7 @@ fi
 # ===== Install network optimization script =====
 echo "[DIY-P2] Installing network optimization script..."
 if [ -f "diy/common/netopt.sh" ] && [ -d "$TARGET_DIR/package/base-files/files/etc/init.d" ]; then
-    cp -f diy/common/netopt.sh "$TARGET_DIR/package/base-files/files/etc/init.d/netopt" || true
+    sed 's/\r$//' diy/common/netopt.sh > "$TARGET_DIR/package/base-files/files/etc/init.d/netopt" || true
     chmod +x "$TARGET_DIR/package/base-files/files/etc/init.d/netopt" || true
     # Create rc.d symlink so netopt auto-starts on boot (START=99, after network)
     mkdir -p "$TARGET_DIR/package/base-files/files/etc/rc.d"
@@ -338,7 +339,7 @@ mkdir -p "$MODULES_DST"
 if [ -d "$MODULES_SRC" ]; then
     for _mod in "$MODULES_SRC"/[0-9][0-9]-*.sh; do
         [ -f "$_mod" ] || continue
-        cp -f "$_mod" "$MODULES_DST/" || true
+        sed 's/\r$//' "$_mod" > "$MODULES_DST/$(basename "$_mod")" || true
         chmod +x "$MODULES_DST/$(basename $_mod)" || true
         echo "[DIY-P2] module installed: $(basename $_mod)"
     done
@@ -352,8 +353,8 @@ fi
 echo "[DIY-P2] Installing zzz-default-settings..."
 mkdir -p "$TARGET_DIR/package/base-files/files/etc/uci-defaults"
 if [ -f "diy/common/zzz-default-settings" ]; then
-    cp -f diy/common/zzz-default-settings \
-        "$TARGET_DIR/package/base-files/files/etc/uci-defaults/zzz-default-settings" || true
+    sed 's/\r$//' diy/common/zzz-default-settings \
+        > "$TARGET_DIR/package/base-files/files/etc/uci-defaults/zzz-default-settings" || true
     chmod +x "$TARGET_DIR/package/base-files/files/etc/uci-defaults/zzz-default-settings" || true
     echo "[DIY-P2] zzz-default-settings installed"
 fi
@@ -365,8 +366,8 @@ fi
 # Installed as 'default-settings' (runs before zzz-default-settings alphabetically).
 # Overrides kenzok's luci-app-default-settings package version if present.
 if [ "$TARGET_DIR" = "lede" ] && [ -f "diy/common/default-settings" ]; then
-    cp -f diy/common/default-settings \
-        "$TARGET_DIR/package/base-files/files/etc/uci-defaults/default-settings" || true
+    sed 's/\r$//' diy/common/default-settings \
+        > "$TARGET_DIR/package/base-files/files/etc/uci-defaults/default-settings" || true
     chmod +x "$TARGET_DIR/package/base-files/files/etc/uci-defaults/default-settings" || true
     echo "[DIY-P2] default-settings (LEDE) installed"
 fi

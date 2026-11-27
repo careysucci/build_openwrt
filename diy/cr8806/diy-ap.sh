@@ -44,7 +44,8 @@ BANNER_FILE="${BANNER_FILE:-banner}"
 if [ -f "diy/${BANNER_FILE}" ] && [ -d "$TARGET_DIR/package/base-files/files/etc" ]; then
     if [ "${BANNER_FILE}" = "banner-wyhousewrt" ]; then
         mkdir -p "$TARGET_DIR/package/base-files/files/etc/profile.d"
-        sed -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
+        sed -e 's/\r$//' \
+            -e "s#__AUTHORED_BY__#${AUTHORED_BY:-Wy.House}#g" \
             -e "s#__BUILD_DATE__#$(date +'%Y-%m-%d')#g" \
             "diy/${BANNER_FILE}" \
             > "$TARGET_DIR/package/base-files/files/etc/profile.d/99-wyhouse-banner.sh" || true
@@ -78,8 +79,8 @@ fi
 # ===== Install first-boot AP provisioning =====
 mkdir -p "$TARGET_DIR/package/base-files/files/etc/uci-defaults"
 if [ -f "diy/cr8806/99-ap-bridge" ]; then
-    cp -f diy/cr8806/99-ap-bridge \
-        "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge"
+    sed 's/\r$//' diy/cr8806/99-ap-bridge \
+        > "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge"
     chmod +x "$TARGET_DIR/package/base-files/files/etc/uci-defaults/99-ap-bridge"
     echo "[DIY-AP] 99-ap-bridge installed (stock router defaults + WiFi roaming at first boot)"
 else
@@ -92,7 +93,7 @@ fi
 # calls disabled (intra-LAN bridged frames skip netfilter → less CPU;
 # routed WAN traffic still filtered by firewall4 as usual).
 if [ -f "diy/common/netopt.sh" ] && [ -d "$TARGET_DIR/package/base-files/files/etc/init.d" ]; then
-    cp -f diy/common/netopt.sh "$TARGET_DIR/package/base-files/files/etc/init.d/netopt"
+    sed 's/\r$//' diy/common/netopt.sh > "$TARGET_DIR/package/base-files/files/etc/init.d/netopt"
     chmod +x "$TARGET_DIR/package/base-files/files/etc/init.d/netopt"
     mkdir -p "$TARGET_DIR/package/base-files/files/etc/rc.d"
     ln -sf /etc/init.d/netopt "$TARGET_DIR/package/base-files/files/etc/rc.d/S99netopt"

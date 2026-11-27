@@ -223,8 +223,8 @@ jobs:
         run: |
           cd ${{ env.TARGET_MATRIX }}
           make download -j$(($(nproc)+1))
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
+          find dl -maxdepth 1 -type f -size -1024c -exec ls -l {} \;
+          find dl -maxdepth 1 -type f -size -1024c -exec rm -f {} \;
           make download -j$(($(nproc)+1))
           echo "[WORKFLOW] Package download completed"
 

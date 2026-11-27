@@ -218,8 +218,8 @@ jobs:
           cd ${{ env.TARGET_MATRIX }}
           cp -f .config $GITHUB_WORKSPACE/diy/common/.config
           make download -j$(($(nproc)+1))
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
+          find dl -maxdepth 1 -type f -size -1024c -exec ls -l {} \;
+          find dl -maxdepth 1 -type f -size -1024c -exec rm -f {} \;
           make download -j$(($(nproc)+1))
           echo "[WORKFLOW] Package download completed"
 
@@ -230,7 +230,7 @@ jobs:
           mkdir -p files/etc/config
           mkdir -p files/etc/uci-defaults
           if [ -f "$GITHUB_WORKSPACE/${{ env.CONFIG_FIREWALL_FILE }}" ]; then
-            cp -f $GITHUB_WORKSPACE/${{ env.CONFIG_FIREWALL_FILE }} files/etc/uci-defaults/99-custom-firewall
+            sed 's/\r$//' "$GITHUB_WORKSPACE/${{ env.CONFIG_FIREWALL_FILE }}" > files/etc/uci-defaults/99-custom-firewall
             echo "[WORKFLOW] Firewall configuration applied"
           else
             echo "[WARNING] Firewall config file not found"

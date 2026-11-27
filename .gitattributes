@@ -1,3 +1,18 @@
+*.sh text eol=lf
+diy/banner-wyhousewrt text eol=lf
+diy/common/default-settings text eol=lf
+diy/common/zzz-default-settings text eol=lf
+diy/config/99-custom-firewall text eol=lf
+diy/cr8806/99-ap-bridge text eol=lf
+diy/cr8806/99-ap-bridge-nss text eol=lf
+diy/cr8806/adapter-25.12/10-ath11k-board_id text eol=lf
+diy/cr8806/adapter-25.12/12-ath11k-qcn6122-bdf text eol=lf
+diy/cr8806/adapter-25.12/uboot_env text eol=lf
+diy/cr8806/adapter-nss/12-ath11k-qcn6122-bdf text eol=lf
+diy/cr8806/adapter-nss/13-ath11k-ipq5018-bdf text eol=lf
+diy/cr8806/adapter-nss/uboot_env text eol=lf
+diy/cr8806/nss-overlay/MANIFEST.txt text eol=lf
+
 # Byte-exact vendored files: the NSS overlay tree/ reproduces upstream git
 # blobs, and at least one of them (netifd 0001 patch) carries CRLF inside the
 # blob itself. Any eol conversion (core.autocrlf on Windows) silently breaks

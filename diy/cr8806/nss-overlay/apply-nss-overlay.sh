@@ -33,6 +33,7 @@ OVERLAY_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 MANIFEST="$OVERLAY_DIR/MANIFEST.txt"
 SRC="$OVERLAY_DIR/tree"
 TREE=${1:-.}
+CR=$(printf '\r')
 
 [ -f "$MANIFEST" ] || { echo "apply-nss-overlay: MANIFEST.txt not found" >&2; exit 1; }
 cd "$TREE"
@@ -47,6 +48,8 @@ sha() { sha256sum "$1" | cut -d' ' -f1; }
 pre_fail=0
 pre_n=0
 while IFS=' ' read -r st base new mode path; do
+    st=${st%"$CR"}
+    path=${path%"$CR"}
     case "$st" in '#'*) continue ;; esac
     [ -n "$st" ] || continue
     case "$st" in
@@ -72,6 +75,8 @@ echo "apply-nss-overlay: preconditions ok ($pre_n files match the pinned base)"
 # --- pass 2: apply ------------------------------------------------------------
 n_add=0; n_mod=0; n_del=0; n_link=0
 while IFS=' ' read -r st base new mode path; do
+    st=${st%"$CR"}
+    path=${path%"$CR"}
     case "$st" in '#'*) continue ;; esac
     [ -n "$st" ] || continue
     case "$st" in
@@ -102,6 +107,8 @@ echo "apply-nss-overlay: applied $n_add added, $n_mod modified, $n_del removed, 
 # --- pass 3: verify -----------------------------------------------------------
 ver_fail=0
 while IFS=' ' read -r st base new mode path; do
+    st=${st%"$CR"}
+    path=${path%"$CR"}
     case "$st" in '#'*) continue ;; esac
     [ -n "$st" ] || continue
     case "$st" in
